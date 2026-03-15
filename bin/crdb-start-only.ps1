@@ -1,4 +1,4 @@
-﻿param(
+param(
     [string]$SqlAddr = "127.0.0.1:26257",
     [string]$ListenAddr = "127.0.0.1:26258",
     [string]$HttpAddr = "127.0.0.1:8080",

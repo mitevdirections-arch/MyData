@@ -1,4 +1,4 @@
-﻿param(
+param(
   [int]$Port = 8100,
   [int]$RoutesMax = 5000
 )
