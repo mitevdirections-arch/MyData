@@ -20,6 +20,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 from app.db.model_parts.loader import MODEL_SPLIT_PREP_VERSION
 from app.db.model_parts.ai import (
+    EidonPatternActivationRecord,
     EidonAIQualityEvent,
     EidonPatternDistributionRecord,
     EidonPatternPublishArtifact,

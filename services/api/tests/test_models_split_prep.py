@@ -18,6 +18,7 @@ def test_app_db_models_entrypoint_stays_stable() -> None:
     assert hasattr(models, "EidonPatternPublishArtifact")
     assert hasattr(models, "EidonPatternDistributionRecord")
     assert hasattr(models, "EidonPatternRolloutGovernanceRecord")
+    assert hasattr(models, "EidonPatternActivationRecord")
     assert hasattr(models, "EidonAIQualityEvent")
 
 
@@ -46,6 +47,7 @@ def test_models_import_side_effect_keeps_metadata_loaded() -> None:
         "eidon_pattern_publish_artifacts",
         "eidon_pattern_distribution_records",
         "eidon_pattern_rollout_governance_records",
+        "eidon_pattern_activation_records",
         "eidon_ai_quality_events",
     }
     missing = sorted(expected - table_names)
@@ -58,6 +60,7 @@ def test_representative_model_imports_remain_valid() -> None:
         I18nWorkspacePolicy,
         License,
         EidonAIQualityEvent,
+        EidonPatternActivationRecord,
         EidonPatternDistributionRecord,
         EidonPatternRolloutGovernanceRecord,
         MarketplaceModule,
@@ -101,6 +104,7 @@ def test_representative_model_imports_remain_valid() -> None:
     assert EidonPatternPublishArtifact.__tablename__ == "eidon_pattern_publish_artifacts"
     assert EidonPatternDistributionRecord.__tablename__ == "eidon_pattern_distribution_records"
     assert EidonPatternRolloutGovernanceRecord.__tablename__ == "eidon_pattern_rollout_governance_records"
+    assert EidonPatternActivationRecord.__tablename__ == "eidon_pattern_activation_records"
     assert EidonAIQualityEvent.__tablename__ == "eidon_ai_quality_events"
 
 

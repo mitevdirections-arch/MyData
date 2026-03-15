@@ -10,6 +10,7 @@ from app.core.auth import require_claims, require_superadmin
 from app.db.session import get_db_session
 from app.modules.ai.order_document_intake_service import service as order_document_intake_service
 from app.modules.ai.order_draft_assist_service import service as order_draft_assist_service
+from app.modules.ai.order_pattern_activation_service import service as order_pattern_activation_service
 from app.modules.ai.order_intake_feedback_service import service as order_intake_feedback_service
 from app.modules.ai.order_pattern_distribution_service import service as order_pattern_distribution_service
 from app.modules.ai.order_pattern_rollout_governance_service import service as order_pattern_rollout_governance_service
@@ -20,6 +21,8 @@ from app.modules.ai.order_template_submission_staging_service import service as 
 from app.modules.ai.schemas import (
     EidonPatternDistributionRecordRequestDTO,
     EidonPatternDistributionResponseDTO,
+    EidonPatternActivationRequestDTO,
+    EidonPatternActivationResponseDTO,
     EidonPatternRolloutGovernanceRequestDTO,
     EidonPatternRolloutGovernanceResponseDTO,
     EidonQualitySummaryResponseDTO,
@@ -487,6 +490,48 @@ def superadmin_distribution_record_rollout_governance(
             "authoritative_publish_allowed": out.authoritative_publish_allowed,
             "governance_not_rollout": True,
             "governance_not_activation": True,
+        },
+    )
+    db.commit()
+    return out
+
+
+@router.post(
+    "/superadmin-copilot/rollout-governance-records/{record_id}/activation-record",
+    response_model=EidonPatternActivationResponseDTO,
+)
+def superadmin_rollout_governance_record_activation_record(
+    record_id: str,
+    payload: EidonPatternActivationRequestDTO,
+    claims: dict[str, Any] = Depends(require_superadmin),
+    db: Session = Depends(get_db_session),
+) -> EidonPatternActivationResponseDTO:
+    actor = str(claims.get("sub") or "unknown")
+    try:
+        out = order_pattern_activation_service.record_activation(
+            db=db,
+            record_id=record_id,
+            actor=actor,
+            payload=payload,
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 404 if detail == "rollout_governance_record_not_found" else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+
+    write_audit(
+        db,
+        action="ai.superadmin_rollout_governance_record_activation_record",
+        actor=actor,
+        tenant_id=None,
+        target=f"ai/superadmin-copilot/rollout-governance-records/{record_id}/activation-record",
+        metadata={
+            "rollout_governance_record_id": record_id,
+            "activation_record_id": out.record.id,
+            "activation_status": out.record.activation_status,
+            "template_fingerprint": out.record.template_fingerprint,
+            "authoritative_publish_allowed": out.authoritative_publish_allowed,
+            "activation_not_runtime_enablement": True,
         },
     )
     db.commit()

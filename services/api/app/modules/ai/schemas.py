@@ -433,6 +433,38 @@ class EidonPatternRolloutGovernanceResponseDTO(BaseModel):
     system_truth_rule: str
 
 
+class EidonPatternActivationRequestDTO(BaseModel):
+    activation_note: str | None = None
+    activation_meta: dict[str, Any] | None = None
+
+
+class EidonPatternActivationRecordDTO(BaseModel):
+    id: str
+    rollout_governance_record_id: str
+    tenant_id: str
+    template_fingerprint: str
+    pattern_version: str
+    activation_status: str
+    activation_note: str | None = None
+    activation_meta: dict[str, Any] = Field(default_factory=dict)
+    rollback_from_activation_record_id: str | None = None
+    recorded_by: str
+    recorded_at: str
+    authoritative_publish_allowed: bool
+
+
+class EidonPatternActivationResponseDTO(BaseModel):
+    ok: bool
+    decision: str
+    record: EidonPatternActivationRecordDTO
+    authoritative_publish_allowed: bool
+    no_authoritative_publish_rule: str
+    no_runtime_enablement_rule: str
+    no_activation_worker_rule: str
+    no_tenant_runtime_mutation_rule: str
+    system_truth_rule: str
+
+
 class EidonQualitySummaryRowDTO(BaseModel):
     template_fingerprint: str
     event_count: int
