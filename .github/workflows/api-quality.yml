@@ -71,8 +71,8 @@ jobs:
           pip install httpx
       - name: Start CockroachDB (insecure)
         run: |
-          docker run -d --name mydata-crdb -p 26257:26257 cockroachdb/cockroach:v25.1.0 \
-            start-single-node --insecure --listen-addr 127.0.0.1 --sql-addr 0.0.0.0:26257 --http-addr 0.0.0.0:8080
+          docker run -d --name mydata-crdb -p 26257:26257 --entrypoint cockroach cockroachdb/cockroach:v25.1.0 \
+            start-single-node --insecure --listen-addr=127.0.0.1 --sql-addr=0.0.0.0:26257 --http-addr=0.0.0.0:8080
           for i in $(seq 1 40); do
             if docker exec mydata-crdb cockroach sql --insecure --host=127.0.0.1:26257 --execute="SELECT 1" >/dev/null 2>&1; then
               echo "cockroach_ready"
@@ -112,8 +112,8 @@ jobs:
           pip install pytest
       - name: Start CockroachDB (insecure)
         run: |
-          docker run -d --name mydata-crdb-iso -p 26257:26257 cockroachdb/cockroach:v25.1.0 \
-            start-single-node --insecure --listen-addr 127.0.0.1 --sql-addr 0.0.0.0:26257 --http-addr 0.0.0.0:8080
+          docker run -d --name mydata-crdb-iso -p 26257:26257 --entrypoint cockroach cockroachdb/cockroach:v25.1.0 \
+            start-single-node --insecure --listen-addr=127.0.0.1 --sql-addr=0.0.0.0:26257 --http-addr=0.0.0.0:8080
           for i in $(seq 1 40); do
             if docker exec mydata-crdb-iso cockroach sql --insecure --host=127.0.0.1:26257 --execute="SELECT 1" >/dev/null 2>&1; then
               echo "cockroach_ready"
@@ -159,8 +159,8 @@ jobs:
           pip install pytest
       - name: Start CockroachDB (insecure)
         run: |
-          docker run -d --name mydata-crdb-role -p 26257:26257 cockroachdb/cockroach:v25.1.0 \
-            start-single-node --insecure --listen-addr 127.0.0.1 --sql-addr 0.0.0.0:26257 --http-addr 0.0.0.0:8080
+          docker run -d --name mydata-crdb-role -p 26257:26257 --entrypoint cockroach cockroachdb/cockroach:v25.1.0 \
+            start-single-node --insecure --listen-addr=127.0.0.1 --sql-addr=0.0.0.0:26257 --http-addr=0.0.0.0:8080
           for i in $(seq 1 40); do
             if docker exec mydata-crdb-role cockroach sql --insecure --host=127.0.0.1:26257 --execute="SELECT 1" >/dev/null 2>&1; then
               echo "cockroach_ready"
@@ -204,8 +204,8 @@ jobs:
           pip install httpx
       - name: Start CockroachDB (insecure)
         run: |
-          docker run -d --name mydata-crdb-prod -p 26257:26257 cockroachdb/cockroach:v25.1.0 \
-            start-single-node --insecure --listen-addr 127.0.0.1 --sql-addr 0.0.0.0:26257 --http-addr 0.0.0.0:8080
+          docker run -d --name mydata-crdb-prod -p 26257:26257 --entrypoint cockroach cockroachdb/cockroach:v25.1.0 \
+            start-single-node --insecure --listen-addr=127.0.0.1 --sql-addr=0.0.0.0:26257 --http-addr=0.0.0.0:8080
           for i in $(seq 1 40); do
             if docker exec mydata-crdb-prod cockroach sql --insecure --host=127.0.0.1:26257 --execute="SELECT 1" >/dev/null 2>&1; then
               echo "cockroach_ready"
@@ -247,8 +247,8 @@ jobs:
           pip install httpx
       - name: Start CockroachDB (insecure)
         run: |
-          docker run -d --name mydata-crdb-opr -p 26257:26257 cockroachdb/cockroach:v25.1.0 \
-            start-single-node --insecure --listen-addr 127.0.0.1 --sql-addr 0.0.0.0:26257 --http-addr 0.0.0.0:8080
+          docker run -d --name mydata-crdb-opr -p 26257:26257 --entrypoint cockroach cockroachdb/cockroach:v25.1.0 \
+            start-single-node --insecure --listen-addr=127.0.0.1 --sql-addr=0.0.0.0:26257 --http-addr=0.0.0.0:8080
           for i in $(seq 1 40); do
             if docker exec mydata-crdb-opr cockroach sql --insecure --host=127.0.0.1:26257 --execute="SELECT 1" >/dev/null 2>&1; then
               echo "cockroach_ready"
