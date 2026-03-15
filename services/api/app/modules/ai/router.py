@@ -10,6 +10,7 @@ from app.core.auth import require_claims, require_superadmin
 from app.db.session import get_db_session
 from app.modules.ai.order_document_intake_service import service as order_document_intake_service
 from app.modules.ai.order_draft_assist_service import service as order_draft_assist_service
+from app.modules.ai.order_retrieval_execution_service import service as order_retrieval_execution_service
 from app.modules.ai.order_pattern_activation_service import service as order_pattern_activation_service
 from app.modules.ai.order_runtime_enablement_service import service as order_runtime_enablement_service
 from app.modules.ai.order_runtime_decision_surface_service import service as order_runtime_decision_surface_service
@@ -41,6 +42,8 @@ from app.modules.ai.schemas import (
     EidonOrderDocumentIntakeResponseDTO,
     EidonOrderDraftAssistRequestDTO,
     EidonOrderDraftAssistResponseDTO,
+    EidonOrderReferenceRetrievalRequestDTO,
+    EidonOrderReferenceRetrievalResponseDTO,
     EidonOrderIntakeFeedbackRequestDTO,
     EidonOrderIntakeFeedbackResponseDTO,
     EidonTemplateReviewDecisionRequestDTO,
@@ -85,6 +88,73 @@ def tenant_copilot(
         "policy": "advisory_only",
         "message": "Suggestion prepared under tenant policy constraints.",
     }
+
+
+@router.post("/tenant-copilot/retrieve-order-reference", response_model=EidonOrderReferenceRetrievalResponseDTO)
+def tenant_copilot_retrieve_order_reference(
+    payload: EidonOrderReferenceRetrievalRequestDTO,
+    _entitlement: dict[str, Any] = Depends(require_module_entitlement("AI_COPILOT")),
+    claims: dict[str, Any] = Depends(require_claims),
+    db: Session = Depends(get_db_session),
+) -> EidonOrderReferenceRetrievalResponseDTO:
+    tenant_id = str(claims.get("tenant_id") or "").strip()
+    actor = str(claims.get("sub") or "unknown")
+    if not tenant_id:
+        raise HTTPException(status_code=403, detail="missing_tenant_context")
+
+    try:
+        result = order_retrieval_execution_service.retrieve_order_reference(
+            db=db,
+            tenant_id=tenant_id,
+            order_reference_id=payload.order_id,
+            template_fingerprint=None,
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        if detail == OBJECT_REFERENCE_NOT_ACCESSIBLE:
+            write_audit(
+                db,
+                action="ai.tenant_order_reference_retrieval_deny",
+                actor=actor,
+                tenant_id=tenant_id,
+                target="ai/tenant-copilot/retrieve-order-reference",
+                metadata={
+                    "retrieval_execution": "deny",
+                    "retrieval_object_type": "order",
+                    "retrieval_traceability": "summary_only",
+                },
+            )
+            db.commit()
+            raise HTTPException(status_code=403, detail=detail) from exc
+        raise HTTPException(status_code=400, detail=detail) from exc
+
+    out = EidonOrderReferenceRetrievalResponseDTO(
+        ok=True,
+        tenant_id=tenant_id,
+        capability="EIDON_ORDER_REFERENCE_RETRIEVAL_V1",
+        result=result,
+        authoritative_finalize_allowed=False,
+        warnings=[],
+        source_traceability=result.retrieval_traceability,
+        no_authoritative_finalize_rule="eidon_prepare_only_no_authoritative_finalize",
+        system_truth_rule="ai_does_not_override_system_truth",
+    )
+
+    write_audit(
+        db,
+        action="ai.tenant_order_reference_retrieval",
+        actor=actor,
+        tenant_id=tenant_id,
+        target="ai/tenant-copilot/retrieve-order-reference",
+        metadata={
+            "retrieval_execution": "allow",
+            "retrieval_object_type": "order",
+            "retrieval_traceability": "summary_only",
+            "authoritative_finalize_allowed": out.authoritative_finalize_allowed,
+        },
+    )
+    db.commit()
+    return out
 
 
 @router.post("/tenant-copilot/order-draft-assist", response_model=EidonOrderDraftAssistResponseDTO)

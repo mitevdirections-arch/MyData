@@ -67,6 +67,22 @@ class EidonOrderRetrievalSummaryDTO(BaseModel):
     tenant_visible: bool
 
 
+class EidonOrderReferenceRetrievalRequestDTO(BaseModel):
+    order_id: str
+
+
+class EidonOrderReferenceRetrievalResponseDTO(BaseModel):
+    ok: bool
+    tenant_id: str
+    capability: str
+    result: EidonOrderRetrievalSummaryDTO
+    authoritative_finalize_allowed: bool
+    warnings: list[str] = Field(default_factory=list)
+    source_traceability: EidonRetrievalTraceabilityDTO | None = None
+    no_authoritative_finalize_rule: str
+    system_truth_rule: str
+
+
 class EidonOrderDraftAssistResponseDTO(BaseModel):
     ok: bool
     tenant_id: str
