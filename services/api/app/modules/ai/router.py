@@ -235,6 +235,45 @@ def tenant_copilot_order_document_intake(
     claims: dict[str, Any] = Depends(require_claims),
     db: Session = Depends(get_db_session),
 ) -> EidonOrderDocumentIntakeResponseDTO:
+    return _run_tenant_document_understanding_surface(
+        payload=payload,
+        claims=claims,
+        db=db,
+        action_success="ai.tenant_order_document_intake",
+        action_deny="ai.tenant_order_document_intake_action_boundary_deny",
+        target="ai/tenant-copilot/order-document-intake",
+        surface_marker="compatibility",
+    )
+
+
+@router.post("/tenant-copilot/document-understanding", response_model=EidonOrderDocumentIntakeResponseDTO)
+def tenant_copilot_document_understanding(
+    payload: EidonOrderDocumentIntakeRequestDTO,
+    _entitlement: dict[str, Any] = Depends(require_module_entitlement("AI_COPILOT")),
+    claims: dict[str, Any] = Depends(require_claims),
+    db: Session = Depends(get_db_session),
+) -> EidonOrderDocumentIntakeResponseDTO:
+    return _run_tenant_document_understanding_surface(
+        payload=payload,
+        claims=claims,
+        db=db,
+        action_success="ai.tenant_document_understanding",
+        action_deny="ai.tenant_document_understanding_action_boundary_deny",
+        target="ai/tenant-copilot/document-understanding",
+        surface_marker="canonical",
+    )
+
+
+def _run_tenant_document_understanding_surface(
+    *,
+    payload: EidonOrderDocumentIntakeRequestDTO,
+    claims: dict[str, Any],
+    db: Session,
+    action_success: str,
+    action_deny: str,
+    target: str,
+    surface_marker: str,
+) -> EidonOrderDocumentIntakeResponseDTO:
     tenant_id = str(claims.get("tenant_id") or "").strip()
     actor = str(claims.get("sub") or "unknown")
     if not tenant_id:
@@ -247,12 +286,14 @@ def tenant_copilot_order_document_intake(
         if detail == AI_ACTION_BOUNDARY_VIOLATION:
             write_audit(
                 db,
-                action="ai.tenant_order_document_intake_action_boundary_deny",
+                action=action_deny,
                 actor=actor,
                 tenant_id=tenant_id,
-                target="ai/tenant-copilot/order-document-intake",
+                target=target,
                 metadata={
                     "tenant_action_boundary": detail,
+                    "document_understanding_surface": surface_marker,
+                    "document_understanding_traceability": "summary_only",
                 },
             )
             db.commit()
@@ -260,10 +301,10 @@ def tenant_copilot_order_document_intake(
 
     write_audit(
         db,
-        action="ai.tenant_order_document_intake",
+        action=action_success,
         actor=actor,
         tenant_id=tenant_id,
-        target="ai/tenant-copilot/order-document-intake",
+        target=target,
         metadata={
             "extracted_fields": len(out.extracted_fields),
             "missing_required_fields": len(out.missing_required_fields),
@@ -275,6 +316,8 @@ def tenant_copilot_order_document_intake(
             "template_learning_candidate_eligible": out.template_learning_candidate.eligible,
             "authoritative_finalize_allowed": out.authoritative_finalize_allowed,
             "tenant_action_boundary": "advisory_only",
+            "document_understanding_surface": surface_marker,
+            "document_understanding_traceability": "summary_only",
         },
     )
     db.commit()
