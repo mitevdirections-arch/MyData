@@ -14,6 +14,9 @@ from app.modules.ai.schemas import (
     EidonSourceTraceabilityDTO,
     EidonTemplateLearningCandidateDTO,
 )
+from app.modules.ai.tenant_action_boundary_guard import (
+    service as tenant_action_boundary_guard,
+)
 from app.modules.orders.schemas import OrderCreateRequestDTO
 
 
@@ -401,7 +404,7 @@ class EidonOrderDocumentIntakeService:
         if ambiguous:
             human_confirmation_required_items.extend(f"field_clarification:{x}" for x in sorted(ambiguous))
 
-        return EidonOrderDocumentIntakeResponseDTO(
+        out = EidonOrderDocumentIntakeResponseDTO(
             ok=True,
             tenant_id=str(tenant_id),
             capability="EIDON_ORDER_DOCUMENT_INTAKE_V1",
@@ -420,6 +423,8 @@ class EidonOrderDocumentIntakeService:
             no_authoritative_finalize_rule="eidon_prepare_only_no_authoritative_finalize",
             system_truth_rule="ai_does_not_override_system_truth",
         )
+        tenant_action_boundary_guard.enforce_advisory_only(out)
+        return out
 
 
 service = EidonOrderDocumentIntakeService()

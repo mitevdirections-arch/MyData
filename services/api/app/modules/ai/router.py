@@ -20,6 +20,7 @@ from app.modules.ai.order_quality_analysis_service import service as order_quali
 from app.modules.ai.order_template_publish_service import service as order_template_publish_service
 from app.modules.ai.order_template_review_service import service as order_template_review_service
 from app.modules.ai.order_template_submission_staging_service import service as order_template_submission_staging_service
+from app.modules.ai.tenant_action_boundary_guard import AI_ACTION_BOUNDARY_VIOLATION
 from app.modules.ai.tenant_retrieval_action_guard import (
     OBJECT_REFERENCE_NOT_ACCESSIBLE,
     has_existing_draft_context_path,
@@ -118,6 +119,18 @@ def tenant_copilot_order_draft_assist(
                 },
             )
             db.commit()
+        if detail == AI_ACTION_BOUNDARY_VIOLATION:
+            write_audit(
+                db,
+                action="ai.tenant_order_draft_assist_action_boundary_deny",
+                actor=actor,
+                tenant_id=tenant_id,
+                target="ai/tenant-copilot/order-draft-assist",
+                metadata={
+                    "tenant_action_boundary": detail,
+                },
+            )
+            db.commit()
         status_code = 403 if detail == OBJECT_REFERENCE_NOT_ACCESSIBLE else 400
         raise HTTPException(status_code=status_code, detail=detail) from exc
 
@@ -138,6 +151,7 @@ def tenant_copilot_order_draft_assist(
             "retrieval_execution": "allow" if draft_context_path_used else "not_applicable",
             "retrieval_object_type": "order" if draft_context_path_used else "not_applicable",
             "retrieval_traceability": "summary_only" if draft_context_path_used else "not_applicable",
+            "tenant_action_boundary": "advisory_only",
         },
     )
     db.commit()
@@ -156,7 +170,23 @@ def tenant_copilot_order_document_intake(
     if not tenant_id:
         raise HTTPException(status_code=403, detail="missing_tenant_context")
 
-    out = order_document_intake_service.ingest(tenant_id=tenant_id, payload=payload)
+    try:
+        out = order_document_intake_service.ingest(tenant_id=tenant_id, payload=payload)
+    except ValueError as exc:
+        detail = str(exc)
+        if detail == AI_ACTION_BOUNDARY_VIOLATION:
+            write_audit(
+                db,
+                action="ai.tenant_order_document_intake_action_boundary_deny",
+                actor=actor,
+                tenant_id=tenant_id,
+                target="ai/tenant-copilot/order-document-intake",
+                metadata={
+                    "tenant_action_boundary": detail,
+                },
+            )
+            db.commit()
+        raise HTTPException(status_code=400, detail=detail) from exc
 
     write_audit(
         db,
@@ -174,6 +204,7 @@ def tenant_copilot_order_document_intake(
             "template_fingerprint": out.template_fingerprint,
             "template_learning_candidate_eligible": out.template_learning_candidate.eligible,
             "authoritative_finalize_allowed": out.authoritative_finalize_allowed,
+            "tenant_action_boundary": "advisory_only",
         },
     )
     db.commit()
@@ -212,6 +243,18 @@ def tenant_copilot_order_intake_feedback(
                 },
             )
             db.commit()
+        if detail == AI_ACTION_BOUNDARY_VIOLATION:
+            write_audit(
+                db,
+                action="ai.tenant_order_intake_feedback_action_boundary_deny",
+                actor=actor,
+                tenant_id=tenant_id,
+                target="ai/tenant-copilot/order-intake-feedback",
+                metadata={
+                    "tenant_action_boundary": detail,
+                },
+            )
+            db.commit()
         status_code = 403 if detail == OBJECT_REFERENCE_NOT_ACCESSIBLE else 400
         raise HTTPException(status_code=status_code, detail=detail) from exc
 
@@ -232,6 +275,7 @@ def tenant_copilot_order_intake_feedback(
             "retrieval_execution": "allow" if feedback_reference_path_used else "not_applicable",
             "retrieval_object_type": "order" if feedback_reference_path_used else "not_applicable",
             "retrieval_traceability": "summary_only" if feedback_reference_path_used else "not_applicable",
+            "tenant_action_boundary": "advisory_only",
         },
     )
     db.commit()

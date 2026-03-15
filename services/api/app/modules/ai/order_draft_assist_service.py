@@ -7,6 +7,9 @@ from sqlalchemy.orm import Session
 from app.modules.ai.order_retrieval_execution_service import (
     service as order_retrieval_execution_service,
 )
+from app.modules.ai.tenant_action_boundary_guard import (
+    service as tenant_action_boundary_guard,
+)
 from app.modules.ai.tenant_retrieval_action_guard import (
     get_order_reference_from_existing_draft_context,
     has_existing_draft_context_path,
@@ -324,7 +327,7 @@ class EidonOrderDraftAssistService:
         if ambiguous_fields:
             human_confirmation_required_items.extend([f"field_clarification:{x}" for x in ambiguous_fields])
 
-        return EidonOrderDraftAssistResponseDTO(
+        out = EidonOrderDraftAssistResponseDTO(
             ok=True,
             tenant_id=str(tenant_id),
             capability="EIDON_ORDER_DRAFT_ASSIST_V1",
@@ -340,6 +343,8 @@ class EidonOrderDraftAssistService:
             no_authoritative_finalize_rule="eidon_prepare_only_no_authoritative_finalize",
             system_truth_rule="ai_does_not_override_system_truth",
         )
+        tenant_action_boundary_guard.enforce_advisory_only(out)
+        return out
 
 
 service = EidonOrderDraftAssistService()
