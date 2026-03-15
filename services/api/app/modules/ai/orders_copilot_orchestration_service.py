@@ -4,6 +4,15 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.modules.ai.eidon_orders_intent_contract_v1 import (
+    EIDON_ORDERS_COPILOT_SUPPORTED_INTENTS,
+    EIDON_ORDERS_COPILOT_UNSUPPORTED_INTENT_CODE,
+    ORDERS_COPILOT_INTENT_DOCUMENT_UNDERSTANDING,
+    ORDERS_COPILOT_INTENT_ORDER_DRAFTING,
+    ORDERS_COPILOT_INTENT_ORDER_FEEDBACK,
+    ORDERS_COPILOT_INTENT_RETRIEVE_ORDER_REFERENCE,
+    is_supported_orders_copilot_intent,
+)
 from app.modules.ai.order_document_intake_service import service as order_document_intake_service
 from app.modules.ai.order_draft_assist_service import service as order_draft_assist_service
 from app.modules.ai.order_intake_feedback_service import service as order_intake_feedback_service
@@ -15,15 +24,10 @@ from app.modules.ai.schemas import (
     EidonOrdersCopilotResponseDTO,
 )
 
-UNSUPPORTED_ORDERS_COPILOT_INTENT = "unsupported_orders_copilot_intent"
+UNSUPPORTED_ORDERS_COPILOT_INTENT = EIDON_ORDERS_COPILOT_UNSUPPORTED_INTENT_CODE
 ORDERS_COPILOT_AUTHORITATIVE_FINALIZE_VIOLATION = "orders_copilot_authoritative_finalize_violation"
 DEFAULT_NO_ACTION_EXECUTION_RULE = "eidon_advisory_only_no_action_execution"
-SUPPORTED_ORDERS_COPILOT_INTENTS: tuple[str, ...] = (
-    "retrieve_order_reference",
-    "document_understanding",
-    "order_drafting",
-    "order_feedback",
-)
+SUPPORTED_ORDERS_COPILOT_INTENTS: tuple[str, ...] = EIDON_ORDERS_COPILOT_SUPPORTED_INTENTS
 
 
 class EidonOrdersCopilotOrchestrationService:
@@ -79,12 +83,12 @@ class EidonOrdersCopilotOrchestrationService:
             raise ValueError("missing_tenant_context")
 
         intent_norm = self._normalized(intent)
-        if intent_norm not in SUPPORTED_ORDERS_COPILOT_INTENTS:
+        if not is_supported_orders_copilot_intent(intent_norm):
             raise ValueError(UNSUPPORTED_ORDERS_COPILOT_INTENT)
 
         payload_norm: dict[str, Any] = dict(payload or {})
 
-        if intent_norm == "retrieve_order_reference":
+        if intent_norm == ORDERS_COPILOT_INTENT_RETRIEVE_ORDER_REFERENCE:
             order_reference_id = self._normalized(payload_norm.get("order_id"))
             result = order_retrieval_execution_service.retrieve_order_reference(
                 db=db,
@@ -92,26 +96,28 @@ class EidonOrdersCopilotOrchestrationService:
                 order_reference_id=order_reference_id,
                 template_fingerprint=None,
             )
-        elif intent_norm == "document_understanding":
+        elif intent_norm == ORDERS_COPILOT_INTENT_DOCUMENT_UNDERSTANDING:
             request = EidonOrderDocumentIntakeRequestDTO.model_validate(payload_norm)
             result = order_document_intake_service.ingest(
                 tenant_id=tenant_norm,
                 payload=request,
             )
-        elif intent_norm == "order_drafting":
+        elif intent_norm == ORDERS_COPILOT_INTENT_ORDER_DRAFTING:
             request = EidonOrderDraftAssistRequestDTO.model_validate(payload_norm)
             result = order_draft_assist_service.assist(
                 db=db,
                 tenant_id=tenant_norm,
                 payload=request,
             )
-        else:
+        elif intent_norm == ORDERS_COPILOT_INTENT_ORDER_FEEDBACK:
             request = EidonOrderIntakeFeedbackRequestDTO.model_validate(payload_norm)
             result = order_intake_feedback_service.apply_feedback(
                 db=db,
                 tenant_id=tenant_norm,
                 payload=request,
             )
+        else:
+            raise ValueError(UNSUPPORTED_ORDERS_COPILOT_INTENT)
 
         if self._extract_authoritative_finalize_allowed(result):
             raise ValueError(ORDERS_COPILOT_AUTHORITATIVE_FINALIZE_VIOLATION)

@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.modules.ai.eidon_orders_intent_contract_v1 import EIDON_ORDERS_COPILOT_SUPPORTED_INTENTS
 from app.modules.orders.schemas import (
     OrderAdrDetailsDTO,
     OrderCreateRequestDTO,
@@ -84,7 +85,14 @@ class EidonOrderReferenceRetrievalResponseDTO(BaseModel):
 
 
 class EidonOrdersCopilotRequestDTO(BaseModel):
-    intent: str
+    intent: str = Field(
+        min_length=1,
+        description=(
+            "Canonical EIDON Orders Copilot intent. Unsupported values are "
+            "fail-closed by orchestration."
+        ),
+        json_schema_extra={"enum": list(EIDON_ORDERS_COPILOT_SUPPORTED_INTENTS)},
+    )
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
