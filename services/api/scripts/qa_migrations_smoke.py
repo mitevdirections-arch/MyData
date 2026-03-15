@@ -32,6 +32,7 @@ DEFAULT_EXPECT_TABLES = [
     "orders",
     "guard_heartbeats",
     "eidon_pattern_publish_artifacts",
+    "eidon_pattern_distribution_records",
     "eidon_ai_quality_events",
 ]
 

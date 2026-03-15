@@ -11,11 +11,14 @@ from app.db.session import get_db_session
 from app.modules.ai.order_document_intake_service import service as order_document_intake_service
 from app.modules.ai.order_draft_assist_service import service as order_draft_assist_service
 from app.modules.ai.order_intake_feedback_service import service as order_intake_feedback_service
+from app.modules.ai.order_pattern_distribution_service import service as order_pattern_distribution_service
 from app.modules.ai.order_quality_analysis_service import service as order_quality_analysis_service
 from app.modules.ai.order_template_publish_service import service as order_template_publish_service
 from app.modules.ai.order_template_review_service import service as order_template_review_service
 from app.modules.ai.order_template_submission_staging_service import service as order_template_submission_staging_service
 from app.modules.ai.schemas import (
+    EidonPatternDistributionRecordRequestDTO,
+    EidonPatternDistributionResponseDTO,
     EidonQualitySummaryResponseDTO,
     EidonOrderDocumentIntakeRequestDTO,
     EidonOrderDocumentIntakeResponseDTO,
@@ -394,6 +397,49 @@ def superadmin_template_submission_publish(
             "template_fingerprint": out.artifact.template_fingerprint,
             "authoritative_publish_allowed": out.authoritative_publish_allowed,
             "publish_not_rollout": True,
+        },
+    )
+    db.commit()
+    return out
+
+
+@router.post(
+    "/superadmin-copilot/published-patterns/{artifact_id}/distribution-record",
+    response_model=EidonPatternDistributionResponseDTO,
+)
+def superadmin_published_pattern_distribution_record(
+    artifact_id: str,
+    payload: EidonPatternDistributionRecordRequestDTO,
+    claims: dict[str, Any] = Depends(require_superadmin),
+    db: Session = Depends(get_db_session),
+) -> EidonPatternDistributionResponseDTO:
+    actor = str(claims.get("sub") or "unknown")
+    try:
+        out = order_pattern_distribution_service.record_distribution(
+            db=db,
+            artifact_id=artifact_id,
+            actor=actor,
+            payload=payload,
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 404 if detail == "publish_artifact_not_found" else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+
+    write_audit(
+        db,
+        action="ai.superadmin_published_pattern_distribution_record",
+        actor=actor,
+        tenant_id=None,
+        target=f"ai/superadmin-copilot/published-patterns/{artifact_id}/distribution-record",
+        metadata={
+            "artifact_id": artifact_id,
+            "distribution_record_id": out.record.id,
+            "distribution_status": out.record.distribution_status,
+            "template_fingerprint": out.record.template_fingerprint,
+            "authoritative_publish_allowed": out.authoritative_publish_allowed,
+            "distribution_not_rollout": True,
+            "distribution_not_activation": True,
         },
     )
     db.commit()

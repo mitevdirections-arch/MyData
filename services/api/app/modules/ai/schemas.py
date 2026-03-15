@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field, model_validator
 
 from app.modules.orders.schemas import (
@@ -361,6 +363,39 @@ class EidonTemplatePublishResponseDTO(BaseModel):
     no_authoritative_publish_rule: str
     no_raw_document_rule: str
     no_rollout_rule: str
+    system_truth_rule: str
+
+
+class EidonPatternDistributionRecordRequestDTO(BaseModel):
+    distribution_note: str | None = None
+    distribution_meta: dict[str, Any] | None = None
+    rollback_from_distribution_record_id: str | None = None
+
+
+class EidonPatternDistributionRecordDTO(BaseModel):
+    id: str
+    publish_artifact_id: str
+    tenant_id: str
+    template_fingerprint: str
+    pattern_version: str
+    distribution_status: str
+    distribution_note: str | None = None
+    distribution_meta: dict[str, Any] = Field(default_factory=dict)
+    rollback_from_distribution_record_id: str | None = None
+    recorded_by: str
+    recorded_at: str
+    authoritative_publish_allowed: bool
+
+
+class EidonPatternDistributionResponseDTO(BaseModel):
+    ok: bool
+    decision: str
+    record: EidonPatternDistributionRecordDTO
+    authoritative_publish_allowed: bool
+    no_authoritative_publish_rule: str
+    no_rollout_rule: str
+    no_activation_rule: str
+    no_tenant_runtime_mutation_rule: str
     system_truth_rule: str
 
 

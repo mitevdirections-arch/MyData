@@ -16,6 +16,7 @@ def test_app_db_models_entrypoint_stays_stable() -> None:
     assert hasattr(models, "PaymentInvoiceSequence")
     assert hasattr(models, "PaymentInvoice")
     assert hasattr(models, "EidonPatternPublishArtifact")
+    assert hasattr(models, "EidonPatternDistributionRecord")
     assert hasattr(models, "EidonAIQualityEvent")
 
 
@@ -42,6 +43,7 @@ def test_models_import_side_effect_keeps_metadata_loaded() -> None:
         "marketplace_modules",
         "marketplace_offers",
         "eidon_pattern_publish_artifacts",
+        "eidon_pattern_distribution_records",
         "eidon_ai_quality_events",
     }
     missing = sorted(expected - table_names)
@@ -54,6 +56,7 @@ def test_representative_model_imports_remain_valid() -> None:
         I18nWorkspacePolicy,
         License,
         EidonAIQualityEvent,
+        EidonPatternDistributionRecord,
         MarketplaceModule,
         MarketplaceOffer,
         OnboardingApplication,
@@ -93,6 +96,7 @@ def test_representative_model_imports_remain_valid() -> None:
     assert MarketplaceModule.__tablename__ == "marketplace_modules"
     assert MarketplaceOffer.__tablename__ == "marketplace_offers"
     assert EidonPatternPublishArtifact.__tablename__ == "eidon_pattern_publish_artifacts"
+    assert EidonPatternDistributionRecord.__tablename__ == "eidon_pattern_distribution_records"
     assert EidonAIQualityEvent.__tablename__ == "eidon_ai_quality_events"
 
 

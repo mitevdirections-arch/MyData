@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -105,8 +105,43 @@ class EidonAIQualityEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
 
 
+class EidonPatternDistributionRecord(Base):
+    __tablename__ = "eidon_pattern_distribution_records"
+    __table_args__ = (
+        CheckConstraint(
+            "distribution_status = 'DISTRIBUTION_RECORDED'",
+            name="ck_eidon_pattern_distribution_status_v1",
+        ),
+        Index("ix_eidon_pattern_distribution_publish_unique", "publish_artifact_id", unique=True),
+        Index("ix_eidon_pattern_distribution_tenant_recorded", "tenant_id", "recorded_at"),
+        Index("ix_eidon_pattern_distribution_fingerprint_recorded", "template_fingerprint", "recorded_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, server_default=text("gen_random_uuid()"))
+    publish_artifact_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("eidon_pattern_publish_artifacts.id"),
+        nullable=False,
+    )
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    template_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    pattern_version: Mapped[str] = mapped_column(String(32), nullable=False, default="v1-feedback")
+    distribution_status: Mapped[str] = mapped_column(String(32), nullable=False, default="DISTRIBUTION_RECORDED")
+    distribution_note: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    distribution_meta_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    rollback_from_distribution_record_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("eidon_pattern_distribution_records.id"),
+        nullable=True,
+    )
+    recorded_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
+    authoritative_publish_allowed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
 __all__ = [
     "EidonTemplateSubmissionStaging",
     "EidonPatternPublishArtifact",
     "EidonAIQualityEvent",
+    "EidonPatternDistributionRecord",
 ]
