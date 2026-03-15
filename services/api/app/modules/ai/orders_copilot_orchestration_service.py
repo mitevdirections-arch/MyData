@@ -4,14 +4,16 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.modules.ai.eidon_capability_registry_contract_v1 import (
+    EIDON_CAPABILITY_AI_ORDERS_DOCUMENT_UNDERSTANDING,
+    EIDON_CAPABILITY_AI_ORDERS_DRAFTING,
+    EIDON_CAPABILITY_AI_ORDERS_FEEDBACK,
+    EIDON_CAPABILITY_AI_ORDERS_RETRIEVE_REFERENCE,
+)
 from app.modules.ai.eidon_orders_intent_contract_v1 import (
     EIDON_ORDERS_COPILOT_SUPPORTED_INTENTS,
     EIDON_ORDERS_COPILOT_UNSUPPORTED_INTENT_CODE,
-    ORDERS_COPILOT_INTENT_DOCUMENT_UNDERSTANDING,
-    ORDERS_COPILOT_INTENT_ORDER_DRAFTING,
-    ORDERS_COPILOT_INTENT_ORDER_FEEDBACK,
-    ORDERS_COPILOT_INTENT_RETRIEVE_ORDER_REFERENCE,
-    is_supported_orders_copilot_intent,
+    resolve_orders_copilot_capability_code_or_fail,
 )
 from app.modules.ai.order_document_intake_service import service as order_document_intake_service
 from app.modules.ai.order_draft_assist_service import service as order_draft_assist_service
@@ -83,12 +85,11 @@ class EidonOrdersCopilotOrchestrationService:
             raise ValueError("missing_tenant_context")
 
         intent_norm = self._normalized(intent)
-        if not is_supported_orders_copilot_intent(intent_norm):
-            raise ValueError(UNSUPPORTED_ORDERS_COPILOT_INTENT)
+        capability_code = resolve_orders_copilot_capability_code_or_fail(intent_norm)
 
         payload_norm: dict[str, Any] = dict(payload or {})
 
-        if intent_norm == ORDERS_COPILOT_INTENT_RETRIEVE_ORDER_REFERENCE:
+        if capability_code == EIDON_CAPABILITY_AI_ORDERS_RETRIEVE_REFERENCE:
             order_reference_id = self._normalized(payload_norm.get("order_id"))
             result = order_retrieval_execution_service.retrieve_order_reference(
                 db=db,
@@ -96,20 +97,20 @@ class EidonOrdersCopilotOrchestrationService:
                 order_reference_id=order_reference_id,
                 template_fingerprint=None,
             )
-        elif intent_norm == ORDERS_COPILOT_INTENT_DOCUMENT_UNDERSTANDING:
+        elif capability_code == EIDON_CAPABILITY_AI_ORDERS_DOCUMENT_UNDERSTANDING:
             request = EidonOrderDocumentIntakeRequestDTO.model_validate(payload_norm)
             result = order_document_intake_service.ingest(
                 tenant_id=tenant_norm,
                 payload=request,
             )
-        elif intent_norm == ORDERS_COPILOT_INTENT_ORDER_DRAFTING:
+        elif capability_code == EIDON_CAPABILITY_AI_ORDERS_DRAFTING:
             request = EidonOrderDraftAssistRequestDTO.model_validate(payload_norm)
             result = order_draft_assist_service.assist(
                 db=db,
                 tenant_id=tenant_norm,
                 payload=request,
             )
-        elif intent_norm == ORDERS_COPILOT_INTENT_ORDER_FEEDBACK:
+        elif capability_code == EIDON_CAPABILITY_AI_ORDERS_FEEDBACK:
             request = EidonOrderIntakeFeedbackRequestDTO.model_validate(payload_norm)
             result = order_intake_feedback_service.apply_feedback(
                 db=db,
