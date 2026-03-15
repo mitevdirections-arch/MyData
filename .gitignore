@@ -26,4 +26,7 @@ services/api/artifacts/*.json
 
 # OS junk
 Thumbs.db
-.DS_Store
+.DS_Store/certs/
+/data/
+/bin/cockroach.exe
+!/bin/*.ps1
