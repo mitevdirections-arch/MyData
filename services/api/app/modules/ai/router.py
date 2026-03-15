@@ -11,6 +11,7 @@ from app.db.session import get_db_session
 from app.modules.ai.order_document_intake_service import service as order_document_intake_service
 from app.modules.ai.order_draft_assist_service import service as order_draft_assist_service
 from app.modules.ai.order_pattern_activation_service import service as order_pattern_activation_service
+from app.modules.ai.order_runtime_enablement_service import service as order_runtime_enablement_service
 from app.modules.ai.order_intake_feedback_service import service as order_intake_feedback_service
 from app.modules.ai.order_pattern_distribution_service import service as order_pattern_distribution_service
 from app.modules.ai.order_pattern_rollout_governance_service import service as order_pattern_rollout_governance_service
@@ -23,6 +24,8 @@ from app.modules.ai.schemas import (
     EidonPatternDistributionResponseDTO,
     EidonPatternActivationRequestDTO,
     EidonPatternActivationResponseDTO,
+    EidonRuntimeEnablementRequestDTO,
+    EidonRuntimeEnablementResponseDTO,
     EidonPatternRolloutGovernanceRequestDTO,
     EidonPatternRolloutGovernanceResponseDTO,
     EidonQualitySummaryResponseDTO,
@@ -532,6 +535,49 @@ def superadmin_rollout_governance_record_activation_record(
             "template_fingerprint": out.record.template_fingerprint,
             "authoritative_publish_allowed": out.authoritative_publish_allowed,
             "activation_not_runtime_enablement": True,
+        },
+    )
+    db.commit()
+    return out
+
+
+@router.post(
+    "/superadmin-copilot/activation-records/{record_id}/runtime-enablement-record",
+    response_model=EidonRuntimeEnablementResponseDTO,
+)
+def superadmin_activation_record_runtime_enablement_record(
+    record_id: str,
+    payload: EidonRuntimeEnablementRequestDTO,
+    claims: dict[str, Any] = Depends(require_superadmin),
+    db: Session = Depends(get_db_session),
+) -> EidonRuntimeEnablementResponseDTO:
+    actor = str(claims.get("sub") or "unknown")
+    try:
+        out = order_runtime_enablement_service.record_runtime_enablement(
+            db=db,
+            record_id=record_id,
+            actor=actor,
+            payload=payload,
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 404 if detail == "activation_record_not_found" else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+
+    write_audit(
+        db,
+        action="ai.superadmin_activation_record_runtime_enablement_record",
+        actor=actor,
+        tenant_id=None,
+        target=f"ai/superadmin-copilot/activation-records/{record_id}/runtime-enablement-record",
+        metadata={
+            "activation_record_id": record_id,
+            "runtime_enablement_record_id": out.record.id,
+            "runtime_enablement_status": out.record.runtime_enablement_status,
+            "runtime_decision": out.record.runtime_decision,
+            "template_fingerprint": out.record.template_fingerprint,
+            "authoritative_publish_allowed": out.authoritative_publish_allowed,
+            "runtime_enablement_not_actual_runtime_enablement": True,
         },
     )
     db.commit()

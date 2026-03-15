@@ -212,6 +212,45 @@ class EidonPatternActivationRecord(Base):
     authoritative_publish_allowed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
+class EidonRuntimeEnablementRecord(Base):
+    __tablename__ = "eidon_runtime_enablement_records"
+    __table_args__ = (
+        CheckConstraint(
+            "runtime_enablement_status = 'RUNTIME_ENABLEMENT_RECORDED'",
+            name="ck_eidon_runtime_enablement_status_v1",
+        ),
+        CheckConstraint(
+            "runtime_decision IN ('ENABLEABLE','NOT_ENABLEABLE')",
+            name="ck_eidon_runtime_enablement_decision_v1",
+        ),
+        Index("ix_eidon_runtime_enablement_activation_unique", "activation_record_id", unique=True),
+        Index("ix_eidon_runtime_enablement_tenant_recorded", "tenant_id", "recorded_at"),
+        Index("ix_eidon_runtime_enablement_fingerprint_recorded", "template_fingerprint", "recorded_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, server_default=text("gen_random_uuid()"))
+    activation_record_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("eidon_pattern_activation_records.id"),
+        nullable=False,
+    )
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    template_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    pattern_version: Mapped[str] = mapped_column(String(32), nullable=False, default="v1-feedback")
+    runtime_enablement_status: Mapped[str] = mapped_column(String(32), nullable=False, default="RUNTIME_ENABLEMENT_RECORDED")
+    runtime_decision: Mapped[str] = mapped_column(String(32), nullable=False)
+    runtime_note: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    runtime_meta_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    rollback_from_runtime_enablement_record_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("eidon_runtime_enablement_records.id"),
+        nullable=True,
+    )
+    recorded_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
+    authoritative_publish_allowed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
 __all__ = [
     "EidonTemplateSubmissionStaging",
     "EidonPatternPublishArtifact",
@@ -219,4 +258,5 @@ __all__ = [
     "EidonPatternDistributionRecord",
     "EidonPatternRolloutGovernanceRecord",
     "EidonPatternActivationRecord",
+    "EidonRuntimeEnablementRecord",
 ]

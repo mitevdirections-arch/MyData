@@ -114,6 +114,7 @@ ROUTE_POLICY: dict[tuple[str, str], RoutePolicy] = {
     ("POST", "/ai/superadmin-copilot/published-patterns/{artifact_id}/distribution-record"): RoutePolicy("AI.COPILOT", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("POST", "/ai/superadmin-copilot/distribution-records/{record_id}/rollout-governance"): RoutePolicy("AI.COPILOT", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("POST", "/ai/superadmin-copilot/rollout-governance-records/{record_id}/activation-record"): RoutePolicy("AI.COPILOT", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
+    ("POST", "/ai/superadmin-copilot/activation-records/{record_id}/runtime-enablement-record"): RoutePolicy("AI.COPILOT", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("POST", "/ai/tenant-copilot"): RoutePolicy("AI.COPILOT", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("POST", "/ai/tenant-copilot/order-draft-assist"): RoutePolicy("AI.COPILOT", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("POST", "/ai/tenant-copilot/order-document-intake"): RoutePolicy("AI.COPILOT", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),

@@ -35,6 +35,7 @@ DEFAULT_EXPECT_TABLES = [
     "eidon_pattern_distribution_records",
     "eidon_pattern_rollout_governance_records",
     "eidon_pattern_activation_records",
+    "eidon_runtime_enablement_records",
     "eidon_ai_quality_events",
 ]
 
