@@ -1,0 +1,348 @@
+{
+  "before_profile_runs": [
+    {
+      "throughput_rps": 142.12,
+      "p95_ms": 1571.14,
+      "avg_ms": 904.54,
+      "error_rate": 0.0,
+      "timeouts": 0,
+      "total_requests": 5760,
+      "tenant_db_authz_avg_ms": 361.31,
+      "tenant_db_authz_p95_ms": 739.126,
+      "entitlement_avg_ms": 189.798,
+      "entitlement_p95_ms": 454.166,
+      "query_avg_ms": 133.943,
+      "query_p95_ms": 464.273,
+      "perf_total_requests_local": 477,
+      "profiling_enabled": true,
+      "run": 1
+    },
+    {
+      "throughput_rps": 155.31,
+      "p95_ms": 1374.92,
+      "avg_ms": 736.87,
+      "error_rate": 0.0,
+      "timeouts": 0,
+      "total_requests": 5760,
+      "tenant_db_authz_avg_ms": 319.468,
+      "tenant_db_authz_p95_ms": 654.923,
+      "entitlement_avg_ms": 165.165,
+      "entitlement_p95_ms": 367.857,
+      "query_avg_ms": 111.13,
+      "query_p95_ms": 322.143,
+      "perf_total_requests_local": 936,
+      "profiling_enabled": true,
+      "run": 2
+    },
+    {
+      "throughput_rps": 138.9,
+      "p95_ms": 1625.95,
+      "avg_ms": 850.84,
+      "error_rate": 0.0,
+      "timeouts": 0,
+      "total_requests": 5760,
+      "tenant_db_authz_avg_ms": 304.302,
+      "tenant_db_authz_p95_ms": 671.782,
+      "entitlement_avg_ms": 161.824,
+      "entitlement_p95_ms": 388.744,
+      "query_avg_ms": 105.589,
+      "query_p95_ms": 262.439,
+      "perf_total_requests_local": 1448,
+      "profiling_enabled": true,
+      "run": 3
+    }
+  ],
+  "after_profile_runs": [
+    {
+      "throughput_rps": 128.86,
+      "p95_ms": 1881.64,
+      "avg_ms": 1045.07,
+      "error_rate": 0.0,
+      "timeouts": 0,
+      "total_requests": 5760,
+      "tenant_db_authz_avg_ms": 389.911,
+      "tenant_db_authz_p95_ms": 697.609,
+      "entitlement_avg_ms": 205.582,
+      "entitlement_p95_ms": 446.34,
+      "query_avg_ms": 136.144,
+      "query_p95_ms": 353.082,
+      "perf_total_requests_local": 437,
+      "profiling_enabled": true,
+      "run": 1
+    },
+    {
+      "throughput_rps": 127.49,
+      "p95_ms": 1521.96,
+      "avg_ms": 969.1,
+      "error_rate": 0.0,
+      "timeouts": 0,
+      "total_requests": 5760,
+      "tenant_db_authz_avg_ms": 466.265,
+      "tenant_db_authz_p95_ms": 892.709,
+      "entitlement_avg_ms": 218.419,
+      "entitlement_p95_ms": 449.311,
+      "query_avg_ms": 136.558,
+      "query_p95_ms": 277.327,
+      "perf_total_requests_local": 986,
+      "profiling_enabled": true,
+      "run": 2
+    },
+    {
+      "throughput_rps": 132.93,
+      "p95_ms": 1638.9,
+      "avg_ms": 935.0,
+      "error_rate": 0.0,
+      "timeouts": 0,
+      "total_requests": 5760,
+      "tenant_db_authz_avg_ms": 437.655,
+      "tenant_db_authz_p95_ms": 799.831,
+      "entitlement_avg_ms": 217.526,
+      "entitlement_p95_ms": 437.11,
+      "query_avg_ms": 137.77,
+      "query_p95_ms": 295.039,
+      "perf_total_requests_local": 1430,
+      "profiling_enabled": true,
+      "run": 3
+    }
+  ],
+  "before_nonprofile_runs": [
+    {
+      "throughput_rps": 137.62,
+      "p95_ms": 2300.84,
+      "avg_ms": 948.91,
+      "error_rate": 0.0,
+      "timeouts": 0,
+      "total_requests": 5760,
+      "tenant_db_authz_avg_ms": 0.0,
+      "tenant_db_authz_p95_ms": 0.0,
+      "entitlement_avg_ms": 0.0,
+      "entitlement_p95_ms": 0.0,
+      "query_avg_ms": 0.0,
+      "query_p95_ms": 0.0,
+      "perf_total_requests_local": 0,
+      "profiling_enabled": false,
+      "run": 1
+    },
+    {
+      "throughput_rps": 162.31,
+      "p95_ms": 1313.88,
+      "avg_ms": 777.52,
+      "error_rate": 0.0,
+      "timeouts": 0,
+      "total_requests": 5760,
+      "tenant_db_authz_avg_ms": 0.0,
+      "tenant_db_authz_p95_ms": 0.0,
+      "entitlement_avg_ms": 0.0,
+      "entitlement_p95_ms": 0.0,
+      "query_avg_ms": 0.0,
+      "query_p95_ms": 0.0,
+      "perf_total_requests_local": 0,
+      "profiling_enabled": false,
+      "run": 2
+    },
+    {
+      "throughput_rps": 157.79,
+      "p95_ms": 1362.04,
+      "avg_ms": 770.21,
+      "error_rate": 0.0,
+      "timeouts": 0,
+      "total_requests": 5760,
+      "tenant_db_authz_avg_ms": 0.0,
+      "tenant_db_authz_p95_ms": 0.0,
+      "entitlement_avg_ms": 0.0,
+      "entitlement_p95_ms": 0.0,
+      "query_avg_ms": 0.0,
+      "query_p95_ms": 0.0,
+      "perf_total_requests_local": 0,
+      "profiling_enabled": false,
+      "run": 3
+    }
+  ],
+  "after_nonprofile_runs": [
+    {
+      "throughput_rps": 119.91,
+      "p95_ms": 2324.0,
+      "avg_ms": 1118.39,
+      "error_rate": 0.003472,
+      "timeouts": 1,
+      "total_requests": 5760,
+      "tenant_db_authz_avg_ms": 0.0,
+      "tenant_db_authz_p95_ms": 0.0,
+      "entitlement_avg_ms": 0.0,
+      "entitlement_p95_ms": 0.0,
+      "query_avg_ms": 0.0,
+      "query_p95_ms": 0.0,
+      "perf_total_requests_local": 0,
+      "profiling_enabled": false,
+      "run": 1
+    },
+    {
+      "throughput_rps": 133.5,
+      "p95_ms": 1476.66,
+      "avg_ms": 933.87,
+      "error_rate": 0.0,
+      "timeouts": 0,
+      "total_requests": 5760,
+      "tenant_db_authz_avg_ms": 0.0,
+      "tenant_db_authz_p95_ms": 0.0,
+      "entitlement_avg_ms": 0.0,
+      "entitlement_p95_ms": 0.0,
+      "query_avg_ms": 0.0,
+      "query_p95_ms": 0.0,
+      "perf_total_requests_local": 0,
+      "profiling_enabled": false,
+      "run": 2
+    },
+    {
+      "throughput_rps": 146.88,
+      "p95_ms": 1347.44,
+      "avg_ms": 830.4,
+      "error_rate": 0.0,
+      "timeouts": 0,
+      "total_requests": 5760,
+      "tenant_db_authz_avg_ms": 0.0,
+      "tenant_db_authz_p95_ms": 0.0,
+      "entitlement_avg_ms": 0.0,
+      "entitlement_p95_ms": 0.0,
+      "query_avg_ms": 0.0,
+      "query_p95_ms": 0.0,
+      "perf_total_requests_local": 0,
+      "profiling_enabled": false,
+      "run": 3
+    }
+  ],
+  "before_profile_stats": {
+    "throughput_rps": {
+      "median": 142.12,
+      "min": 138.9,
+      "max": 155.31,
+      "spread": 16.41
+    },
+    "p95_ms": {
+      "median": 1571.14,
+      "min": 1374.92,
+      "max": 1625.95,
+      "spread": 251.03
+    },
+    "tenant_db_authz_avg_ms": {
+      "median": 319.468,
+      "min": 304.302,
+      "max": 361.31,
+      "spread": 57.008
+    },
+    "tenant_db_authz_p95_ms": {
+      "median": 671.782,
+      "min": 654.923,
+      "max": 739.126,
+      "spread": 84.203
+    },
+    "entitlement_avg_ms": {
+      "median": 165.165,
+      "min": 161.824,
+      "max": 189.798,
+      "spread": 27.974
+    },
+    "entitlement_p95_ms": {
+      "median": 388.744,
+      "min": 367.857,
+      "max": 454.166,
+      "spread": 86.309
+    },
+    "query_avg_ms": {
+      "median": 111.13,
+      "min": 105.589,
+      "max": 133.943,
+      "spread": 28.354
+    },
+    "query_p95_ms": {
+      "median": 322.143,
+      "min": 262.439,
+      "max": 464.273,
+      "spread": 201.834
+    }
+  },
+  "after_profile_stats": {
+    "throughput_rps": {
+      "median": 128.86,
+      "min": 127.49,
+      "max": 132.93,
+      "spread": 5.44
+    },
+    "p95_ms": {
+      "median": 1638.9,
+      "min": 1521.96,
+      "max": 1881.64,
+      "spread": 359.68
+    },
+    "tenant_db_authz_avg_ms": {
+      "median": 437.655,
+      "min": 389.911,
+      "max": 466.265,
+      "spread": 76.354
+    },
+    "tenant_db_authz_p95_ms": {
+      "median": 799.831,
+      "min": 697.609,
+      "max": 892.709,
+      "spread": 195.1
+    },
+    "entitlement_avg_ms": {
+      "median": 217.526,
+      "min": 205.582,
+      "max": 218.419,
+      "spread": 12.837
+    },
+    "entitlement_p95_ms": {
+      "median": 446.34,
+      "min": 437.11,
+      "max": 449.311,
+      "spread": 12.201
+    },
+    "query_avg_ms": {
+      "median": 136.558,
+      "min": 136.144,
+      "max": 137.77,
+      "spread": 1.626
+    },
+    "query_p95_ms": {
+      "median": 295.039,
+      "min": 277.327,
+      "max": 353.082,
+      "spread": 75.755
+    }
+  },
+  "before_nonprofile_stats": {
+    "throughput_rps": {
+      "median": 157.79,
+      "min": 137.62,
+      "max": 162.31,
+      "spread": 24.69
+    },
+    "p95_ms": {
+      "median": 1362.04,
+      "min": 1313.88,
+      "max": 2300.84,
+      "spread": 986.96
+    }
+  },
+  "after_nonprofile_stats": {
+    "throughput_rps": {
+      "median": 133.5,
+      "min": 119.91,
+      "max": 146.88,
+      "spread": 26.97
+    },
+    "p95_ms": {
+      "median": 1476.66,
+      "min": 1347.44,
+      "max": 2324.0,
+      "spread": 976.56
+    }
+  },
+  "nonprofile_end_to_end_delta": {
+    "p95_ms_median_delta": 114.62,
+    "p95_ms_median_delta_pct": 8.415,
+    "throughput_rps_median_delta": -24.29,
+    "throughput_rps_median_delta_pct": -15.394
+  }
+}

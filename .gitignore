@@ -1,0 +1,29 @@
+# Python bytecode / caches
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+coverage.xml
+htmlcov/
+
+# Local environment files (keep templates)
+**/.env
+**/.env.*
+!**/.env.example
+
+# Runtime artifacts and logs
+services/api/artifacts/*.json
+*.log
+*.tmp
+*.temp
+*.bak
+*.orig
+*.old
+*~
+
+# OS junk
+Thumbs.db
+.DS_Store

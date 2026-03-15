@@ -1,0 +1,12 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: mydata-api-cert
+  namespace: __NAMESPACE__
+spec:
+  secretName: __TLS_SECRET_NAME__
+  issuerRef:
+    name: __CERT_MANAGER_ISSUER_NAME__
+    kind: __CERT_ISSUER_KIND__
+  dnsNames:
+    - __HOSTNAME__

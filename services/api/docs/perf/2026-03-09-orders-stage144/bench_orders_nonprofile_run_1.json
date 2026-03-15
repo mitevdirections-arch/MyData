@@ -1,0 +1,102 @@
+{
+  "ok": true,
+  "summary": {
+    "stages_planned": [
+      144
+    ],
+    "stages_executed": [
+      144
+    ],
+    "stages_passed": 0,
+    "stages_failed": 1,
+    "overall_pass": false
+  },
+  "meta": {
+    "api_base": "http://127.0.0.1:8110",
+    "token_used": true,
+    "targets_count": 1,
+    "targets_sample": [
+      "/orders"
+    ],
+    "target_filter": {
+      "filtered_count": 0,
+      "accessible_count": 1,
+      "filtered_sample": [],
+      "preflight_status_counts": {
+        "200": 1
+      },
+      "mode": "only_2xx"
+    },
+    "generated_at": "2026-03-09T21:31:37.169977+00:00",
+    "config": {
+      "requests_per_session": 40,
+      "workers_cap": 256,
+      "timeout_seconds": 20.0,
+      "max_error_rate": 0.02,
+      "max_p95_ms": 1200.0,
+      "stop_on_fail": true
+    }
+  },
+  "stages": [
+    {
+      "stage_concurrency": 144,
+      "workers_used": 144,
+      "requests_per_session": 40,
+      "total_requests": 5760,
+      "ok_2xx": 5757,
+      "errors": 0,
+      "error_rate": 0.0,
+      "non_2xx": 3,
+      "non_2xx_rate": 0.000521,
+      "timeouts": 0,
+      "duration_seconds": 77.084,
+      "throughput_rps": 74.72,
+      "avg_ms": 1612.86,
+      "p95_ms": 3252.72,
+      "p99_ms": 6425.41,
+      "max_ms": 15609.7,
+      "status_counts": {
+        "200": 5757,
+        "403": 3
+      },
+      "top_errors": [
+        {
+          "error": "http_error:403",
+          "count": 3
+        }
+      ],
+      "passed": false,
+      "thresholds": {
+        "max_error_rate": 0.02,
+        "max_p95_ms": 1200.0,
+        "pass_error_rate": true,
+        "pass_p95_ms": false
+      },
+      "health": {
+        "ok": true,
+        "checks": [
+          {
+            "path": "/healthz",
+            "ok": true,
+            "status": 200,
+            "elapsed_ms": 23.15,
+            "body": {
+              "ok": true
+            }
+          },
+          {
+            "path": "/healthz/db",
+            "ok": true,
+            "status": 200,
+            "elapsed_ms": 2770.85,
+            "body": {
+              "ok": true,
+              "db": "ok",
+              "detail": "db_ready"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,212 @@
+﻿{
+    "ok":  true,
+    "profiling":  {
+                      "enabled":  true,
+                      "started_at":  "2026-03-09T21:21:41.229600+00:00",
+                      "filters":  {
+                                      "methods":  [
+                                                      "GET"
+                                                  ],
+                                      "path_prefixes":  [
+                                                            "/orders"
+                                                        ]
+                                  },
+                      "window_size":  4096,
+                      "total_requests":  973,
+                      "status_counts":  {
+                                            "200":  973
+                                        },
+                      "segments":  {
+                                       "authz_ms":  {
+                                                        "count":  973,
+                                                        "window_samples":  973,
+                                                        "total_ms":  994248.25,
+                                                        "avg_ms":  1021.838,
+                                                        "p50_ms":  911.67,
+                                                        "p95_ms":  2500.278,
+                                                        "p99_ms":  3883.263,
+                                                        "max_ms":  6253.418
+                                                    },
+                                       "connection_acquire_ms":  {
+                                                                     "count":  973,
+                                                                     "window_samples":  973,
+                                                                     "total_ms":  198873.806,
+                                                                     "avg_ms":  204.392,
+                                                                     "p50_ms":  153.299,
+                                                                     "p95_ms":  547.546,
+                                                                     "p99_ms":  1067.598,
+                                                                     "max_ms":  2878.121
+                                                                 },
+                                       "dependency_overhead_ms":  {
+                                                                      "count":  973,
+                                                                      "window_samples":  973,
+                                                                      "total_ms":  63.328,
+                                                                      "avg_ms":  0.065,
+                                                                      "p50_ms":  0.061,
+                                                                      "p95_ms":  0.086,
+                                                                      "p99_ms":  0.16,
+                                                                      "max_ms":  1.356
+                                                                  },
+                                       "entitlement_ms":  {
+                                                              "count":  973,
+                                                              "window_samples":  973,
+                                                              "total_ms":  501874.539,
+                                                              "avg_ms":  515.801,
+                                                              "p50_ms":  430.866,
+                                                              "p95_ms":  1327.918,
+                                                              "p99_ms":  2471.195,
+                                                              "max_ms":  4226.944
+                                                          },
+                                       "middleware_total_ms":  {
+                                                                   "count":  973,
+                                                                   "window_samples":  973,
+                                                                   "total_ms":  2602050.078,
+                                                                   "avg_ms":  2674.255,
+                                                                   "p50_ms":  2648.363,
+                                                                   "p95_ms":  5174.655,
+                                                                   "p99_ms":  6595.575,
+                                                                   "max_ms":  9074.872
+                                                               },
+                                       "policy_resolve_ms":  {
+                                                                 "count":  973,
+                                                                 "window_samples":  973,
+                                                                 "total_ms":  994314.815,
+                                                                 "avg_ms":  1021.906,
+                                                                 "p50_ms":  911.741,
+                                                                 "p95_ms":  2500.346,
+                                                                 "p99_ms":  3883.328,
+                                                                 "max_ms":  6253.484
+                                                             },
+                                       "process_time_ms":  {
+                                                               "count":  973,
+                                                               "window_samples":  973,
+                                                               "total_ms":  2474084.896,
+                                                               "avg_ms":  2542.739,
+                                                               "p50_ms":  2498.105,
+                                                               "p95_ms":  5032.624,
+                                                               "p99_ms":  6497.891,
+                                                               "max_ms":  8861.74
+                                                           },
+                                       "query_ms":  {
+                                                        "count":  973,
+                                                        "window_samples":  973,
+                                                        "total_ms":  339349.449,
+                                                        "avg_ms":  348.766,
+                                                        "p50_ms":  273.409,
+                                                        "p95_ms":  946.157,
+                                                        "p99_ms":  1586.889,
+                                                        "max_ms":  3028.26
+                                                    },
+                                       "queue_wait_ms":  {
+                                                             "count":  973,
+                                                             "window_samples":  973,
+                                                             "total_ms":  95.687,
+                                                             "avg_ms":  0.098,
+                                                             "p50_ms":  0.081,
+                                                             "p95_ms":  0.112,
+                                                             "p99_ms":  0.278,
+                                                             "max_ms":  5.655
+                                                         },
+                                       "request_wall_ms":  {
+                                                               "count":  973,
+                                                               "window_samples":  973,
+                                                               "total_ms":  2602082.371,
+                                                               "avg_ms":  2674.288,
+                                                               "p50_ms":  2648.395,
+                                                               "p95_ms":  5174.683,
+                                                               "p99_ms":  6595.606,
+                                                               "max_ms":  9074.895
+                                                           },
+                                       "response_encode_ms":  {
+                                                                  "count":  973,
+                                                                  "window_samples":  973,
+                                                                  "total_ms":  84112.434,
+                                                                  "avg_ms":  86.446,
+                                                                  "p50_ms":  33.576,
+                                                                  "p95_ms":  345.204,
+                                                                  "p99_ms":  678.544,
+                                                                  "max_ms":  1670.964
+                                                              },
+                                       "rls_bind_ms":  {
+                                                           "count":  973,
+                                                           "window_samples":  973,
+                                                           "total_ms":  44.728,
+                                                           "avg_ms":  0.046,
+                                                           "p50_ms":  0.045,
+                                                           "p95_ms":  0.06,
+                                                           "p99_ms":  0.097,
+                                                           "max_ms":  0.424
+                                                       },
+                                       "serialize_ms":  {
+                                                            "count":  973,
+                                                            "window_samples":  973,
+                                                            "total_ms":  7933.099,
+                                                            "avg_ms":  8.153,
+                                                            "p50_ms":  4.536,
+                                                            "p95_ms":  17.614,
+                                                            "p99_ms":  78.715,
+                                                            "max_ms":  599.752
+                                                        },
+                                       "session_open_ms":  {
+                                                               "count":  973,
+                                                               "window_samples":  973,
+                                                               "total_ms":  85.204,
+                                                               "avg_ms":  0.088,
+                                                               "p50_ms":  0.079,
+                                                               "p95_ms":  0.104,
+                                                               "p99_ms":  0.217,
+                                                               "max_ms":  3.817
+                                                           },
+                                       "session_timeout_setup_ms":  {
+                                                                        "count":  973,
+                                                                        "window_samples":  973,
+                                                                        "total_ms":  7458.994,
+                                                                        "avg_ms":  7.666,
+                                                                        "p50_ms":  0.0,
+                                                                        "p95_ms":  0.0,
+                                                                        "p99_ms":  183.882,
+                                                                        "max_ms":  1041.125
+                                                                    },
+                                       "tenant_db_authz_ms":  {
+                                                                  "count":  973,
+                                                                  "window_samples":  973,
+                                                                  "total_ms":  994227.125,
+                                                                  "avg_ms":  1021.816,
+                                                                  "p50_ms":  911.649,
+                                                                  "p95_ms":  2500.259,
+                                                                  "p99_ms":  3883.246,
+                                                                  "max_ms":  6253.401
+                                                              },
+                                       "token_verify_ms":  {
+                                                               "count":  973,
+                                                               "window_samples":  973,
+                                                               "total_ms":  534.808,
+                                                               "avg_ms":  0.55,
+                                                               "p50_ms":  0.367,
+                                                               "p95_ms":  0.527,
+                                                               "p99_ms":  1.625,
+                                                               "max_ms":  150.015
+                                                           },
+                                       "total_request_ms":  {
+                                                                "count":  973,
+                                                                "window_samples":  973,
+                                                                "total_ms":  2602050.078,
+                                                                "avg_ms":  2674.255,
+                                                                "p50_ms":  2648.363,
+                                                                "p95_ms":  5174.655,
+                                                                "p99_ms":  6595.575,
+                                                                "max_ms":  9074.872
+                                                            },
+                                       "total_service_ms":  {
+                                                                "count":  973,
+                                                                "window_samples":  973,
+                                                                "total_ms":  849601.266,
+                                                                "avg_ms":  873.177,
+                                                                "p50_ms":  765.324,
+                                                                "p95_ms":  2128.954,
+                                                                "p99_ms":  3056.734,
+                                                                "max_ms":  4519.365
+                                                            }
+                                   }
+                  }
+}

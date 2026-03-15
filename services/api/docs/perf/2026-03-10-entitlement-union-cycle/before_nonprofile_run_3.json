@@ -1,0 +1,96 @@
+{
+  "ok": true,
+  "summary": {
+    "stages_planned": [
+      144
+    ],
+    "stages_executed": [
+      144
+    ],
+    "stages_passed": 0,
+    "stages_failed": 1,
+    "overall_pass": false
+  },
+  "meta": {
+    "api_base": "http://127.0.0.1:8210",
+    "token_used": true,
+    "targets_count": 1,
+    "targets_sample": [
+      "/orders"
+    ],
+    "target_filter": {
+      "filtered_count": 0,
+      "accessible_count": 1,
+      "filtered_sample": [],
+      "preflight_status_counts": {
+        "200": 1
+      },
+      "mode": "only_2xx"
+    },
+    "generated_at": "2026-03-10T20:31:52.167903+00:00",
+    "config": {
+      "requests_per_session": 40,
+      "workers_cap": 256,
+      "timeout_seconds": 20.0,
+      "max_error_rate": 0.02,
+      "max_p95_ms": 1200.0,
+      "stop_on_fail": true
+    }
+  },
+  "stages": [
+    {
+      "stage_concurrency": 144,
+      "workers_used": 144,
+      "requests_per_session": 40,
+      "total_requests": 5760,
+      "ok_2xx": 5760,
+      "errors": 0,
+      "error_rate": 0.0,
+      "non_2xx": 0,
+      "non_2xx_rate": 0.0,
+      "timeouts": 0,
+      "duration_seconds": 36.505,
+      "throughput_rps": 157.79,
+      "avg_ms": 770.21,
+      "p95_ms": 1362.04,
+      "p99_ms": 1770.06,
+      "max_ms": 2720.07,
+      "status_counts": {
+        "200": 5760
+      },
+      "top_errors": [],
+      "passed": false,
+      "thresholds": {
+        "max_error_rate": 0.02,
+        "max_p95_ms": 1200.0,
+        "pass_error_rate": true,
+        "pass_p95_ms": false
+      },
+      "health": {
+        "ok": true,
+        "checks": [
+          {
+            "path": "/healthz",
+            "ok": true,
+            "status": 200,
+            "elapsed_ms": 5.74,
+            "body": {
+              "ok": true
+            }
+          },
+          {
+            "path": "/healthz/db",
+            "ok": true,
+            "status": 200,
+            "elapsed_ms": 6.58,
+            "body": {
+              "ok": true,
+              "db": "ok",
+              "detail": "db_ready"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

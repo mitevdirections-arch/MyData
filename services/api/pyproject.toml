@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mydata-api"
+version = "0.5.0"
+description = "Security-first multi-tenant ERP API"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.116.0",
+  "uvicorn[standard]>=0.35.0",
+  "pydantic>=2.11.0",
+  "pydantic-settings>=2.10.0",
+  "sqlalchemy>=2.0.40",
+  "sqlalchemy-cockroachdb>=2.0.3",
+  "alembic>=1.16.0",
+  "psycopg[binary]>=3.2.0",
+  "python-dotenv>=1.1.0",
+  "boto3>=1.36.0",
+  "redis>=5.2.0"
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]

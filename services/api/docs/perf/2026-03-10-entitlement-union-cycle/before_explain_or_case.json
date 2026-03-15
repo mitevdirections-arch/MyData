@@ -1,0 +1,30 @@
+{
+  "shape": "or_case_top1",
+  "sql": "\nSELECT license_type, id, valid_to\nFROM licenses\nWHERE tenant_id = :tenant_id\n  AND status = 'ACTIVE'\n  AND valid_from <= now()\n  AND valid_to >= now()\n  AND (\n    license_type = 'STARTUP'\n    OR (\n      module_code = :module_code\n      AND license_type != 'CORE'\n      AND license_type != 'STARTUP'\n    )\n  )\nORDER BY CASE WHEN license_type = 'STARTUP' THEN 0 ELSE 1 END, valid_to DESC\nLIMIT 1\n",
+  "plan": [
+    "distribution: local",
+    "vectorized: true",
+    "",
+    "\u2022 top-k",
+    "\u2502 estimated row count: 0",
+    "\u2502 order: +column12,-valid_to",
+    "\u2502 k: 1",
+    "\u2502",
+    "\u2514\u2500\u2500 \u2022 render",
+    "    \u2502",
+    "    \u2514\u2500\u2500 \u2022 filter",
+    "        \u2502 estimated row count: 0",
+    "        \u2502 filter: (((status = 'ACTIVE') AND (valid_from <= '2026-03-10 20:25:50.173068+00')) AND (valid_to >= '2026-03-10 20:25:50.173068+00')) AND ((license_type = 'STARTUP') OR (((module_code = 'MODULE_ORDERS') AND (license_type != 'CORE')) AND (license_type != 'STARTUP')))",
+    "        \u2502",
+    "        \u2514\u2500\u2500 \u2022 scan",
+    "              estimated row count: 2 (2.7% of the table; stats collected 23 hours ago)",
+    "              table: licenses@ix_licenses_tenant_module_status_validto_cover",
+    "              spans: [/'tenant-bench-prof-20260309224144' - /'tenant-bench-prof-20260309224144']",
+    "",
+    "index recommendations: 2",
+    "1. type: index creation",
+    "   SQL command: CREATE INDEX ON defaultdb.public.licenses (tenant_id) STORING (license_type, module_code, status, valid_from, valid_to);",
+    "2. type: index creation",
+    "   SQL command: CREATE INDEX ON defaultdb.public.licenses (status) STORING (tenant_id, license_type, module_code, valid_from, valid_to);"
+  ]
+}

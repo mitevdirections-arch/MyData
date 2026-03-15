@@ -1,0 +1,212 @@
+name: API Quality Gates
+
+on:
+  push:
+    paths:
+      - 'services/api/**'
+      - '.github/workflows/**'
+      - '.gitleaks.toml'
+  pull_request:
+    paths:
+      - 'services/api/**'
+      - '.github/workflows/**'
+      - '.gitleaks.toml'
+
+jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+  tests:
+    runs-on: ubuntu-latest
+    needs: [gitleaks]
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pytest
+      - name: Run tests
+        env:
+          PYTHONPATH: .
+        run: pytest -q
+
+  migrations-smoke:
+    runs-on: ubuntu-latest
+    needs: [gitleaks]
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Start CockroachDB (insecure)
+        run: |
+          docker run -d --name mydata-crdb -p 26257:26257 cockroachdb/cockroach:v25.1.0 \
+            start-single-node --insecure --listen-addr=0.0.0.0 --http-addr=0.0.0.0:8080
+          for i in $(seq 1 40); do
+            if docker exec mydata-crdb cockroach sql --insecure --host=127.0.0.1:26257 --execute="SELECT 1" >/dev/null 2>&1; then
+              echo "cockroach_ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "cockroach_not_ready" >&2
+          docker logs mydata-crdb || true
+          exit 1
+      - name: Run migration smoke (forward-only)
+        env:
+          PYTHONPATH: .
+          DATABASE_URL: cockroachdb+psycopg://root@127.0.0.1:26257/defaultdb?sslmode=disable
+        run: python scripts/qa_migrations_smoke.py --strict
+      - name: Stop CockroachDB
+        if: always()
+        run: docker rm -f mydata-crdb || true
+
+  tenant-isolation-e2e:
+    runs-on: ubuntu-latest
+    needs: [gitleaks]
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pytest
+      - name: Start CockroachDB (insecure)
+        run: |
+          docker run -d --name mydata-crdb-iso -p 26257:26257 cockroachdb/cockroach:v25.1.0 \
+            start-single-node --insecure --listen-addr=0.0.0.0 --http-addr=0.0.0.0:8080
+          for i in $(seq 1 40); do
+            if docker exec mydata-crdb-iso cockroach sql --insecure --host=127.0.0.1:26257 --execute="SELECT 1" >/dev/null 2>&1; then
+              echo "cockroach_ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "cockroach_not_ready" >&2
+          docker logs mydata-crdb-iso || true
+          exit 1
+      - name: Migrate schema
+        env:
+          PYTHONPATH: .
+          DATABASE_URL: cockroachdb+psycopg://root@127.0.0.1:26257/defaultdb?sslmode=disable
+        run: python -m alembic upgrade head
+      - name: Run tenant isolation e2e
+        env:
+          PYTHONPATH: .
+          DATABASE_URL: cockroachdb+psycopg://root@127.0.0.1:26257/defaultdb?sslmode=disable
+          TENANT_ISOLATION_E2E_ENABLED: 'true'
+        run: pytest -q tests/test_tenant_isolation_e2e.py
+      - name: Stop CockroachDB
+        if: always()
+        run: docker rm -f mydata-crdb-iso || true
+
+  role-separation-e2e:
+    runs-on: ubuntu-latest
+    needs: [gitleaks]
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pytest
+      - name: Start CockroachDB (insecure)
+        run: |
+          docker run -d --name mydata-crdb-role -p 26257:26257 cockroachdb/cockroach:v25.1.0 \
+            start-single-node --insecure --listen-addr=0.0.0.0 --http-addr=0.0.0.0:8080
+          for i in $(seq 1 40); do
+            if docker exec mydata-crdb-role cockroach sql --insecure --host=127.0.0.1:26257 --execute="SELECT 1" >/dev/null 2>&1; then
+              echo "cockroach_ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "cockroach_not_ready" >&2
+          docker logs mydata-crdb-role || true
+          exit 1
+      - name: Migrate schema
+        env:
+          PYTHONPATH: .
+          DATABASE_URL: cockroachdb+psycopg://root@127.0.0.1:26257/defaultdb?sslmode=disable
+        run: python -m alembic upgrade head
+      - name: Run role separation e2e
+        env:
+          PYTHONPATH: .
+          DATABASE_URL: cockroachdb+psycopg://root@127.0.0.1:26257/defaultdb?sslmode=disable
+          ROLE_SEPARATION_E2E_ENABLED: 'true'
+        run: pytest -q tests/test_role_separation_e2e.py
+      - name: Stop CockroachDB
+        if: always()
+        run: docker rm -f mydata-crdb-role || true
+  prod-gate:
+    runs-on: ubuntu-latest
+    needs: [gitleaks]
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Run prod gate
+        env:
+          PYTHONPATH: .
+        run: python scripts/prod_gate.py
+
+  negative-qa:
+    runs-on: ubuntu-latest
+    needs: [gitleaks]
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Run negative QA pack
+        env:
+          PYTHONPATH: .
+        run: python scripts/qa_negative_pack.py --strict

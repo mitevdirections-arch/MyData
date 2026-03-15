@@ -1,0 +1,13 @@
+title = "MyData Gitleaks Config"
+
+[allowlist]
+description = "Allow known non-secret placeholders"
+regexes = [
+  '''change-me-[a-z0-9\-]+''',
+  '''<SUPERADMIN_TOKEN>''',
+  '''example''',
+]
+paths = [
+  '''(^|/)tests/''',
+  '''(^|/)artifacts/''',
+]

@@ -1,0 +1,10 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: mydata-api
+  namespace: __NAMESPACE__
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: mydata-api

@@ -1,0 +1,65 @@
+# Phase 1 Status
+
+## Implemented
+- Country onboarding engine integrated (`/public/country-engine/*`) with locale/date/time/unit defaults and tax guidance by country.
+- Public onboarding module integrated with country engine defaults and DB persistence (`/public/onboarding/applications`, `/admin/onboarding/applications`).
+- Core auth token flow (`/auth/dev-token`) with signed access tokens.
+- Request context middleware with request ID propagation.
+- Security headers middleware.
+- Sensitive rate-limit middleware for high-risk endpoints.
+- Tenant context hardening: optional `X-Tenant-ID` must match token tenant (`tenant_context_mismatch` on mismatch).
+- Core entitlement middleware for protected tenant routes (`core_license_required` when no active CORE license).
+- RBAC dependencies: authenticated, tenant-admin, superadmin.
+- Licensing kernel with DB persistence and invariants:
+  - startup non-renewable
+  - startup + core parallel issuance
+  - module trial requires active core
+  - core entitlement lookup + seat limit exposure (`/licenses/core-entitlement`)
+  - seat-limit enforcement on guard lease flow (`core_seat_limit_exceeded`)
+  - visual license identity code on issue and list (`LIC-{LABEL}-{YYYYMMDD}-{VAT4}-{OURS4}`)
+  - visual preview endpoint (`/licenses/admin/visual-code-preview`)
+- Guard foundation:
+  - heartbeat ingestion
+  - device lease policy (one active lease per tenant+user)
+  - adaptive heartbeat behavior policy with events/flags:
+    - `STARTUP`, `KEEPALIVE`, `LOGOUT`
+    - clean streak multipliers `x1/x2/x3/x4`
+    - suspicion reset (`suspected_abuse`)
+    - license-expiry interval tightening priority
+  - behavior policy endpoint (`/guard/heartbeat/policy`)
+  - tenant status from lease-vs-heartbeat verification
+  - superadmin verification endpoint (`/guard/admin/tenant-verify`)
+- Guard Bot operations:
+  - run-once tenant sweep (`POST /guard/admin/bot/check-once`)
+  - check history listing (`GET /guard/admin/bot/checks`)
+  - persistent check snapshots in `guard_bot_checks`
+  - background worker script for scheduled sweeps (`scripts/guard_bot_worker.py`)
+- Tenant-controlled public visibility policy via `/admin/public-profile/settings` and `/public/profile/{tenant_id}`.
+- Zero-retention storage policy module:
+  - `/admin/storage/policy`
+  - `/admin/storage/verification-docs/*`
+  - metadata-only records in `storage_object_meta`
+  - temporary verification-doc exception flow with retention window
+- MinIO signed presign upload URL generation (`SIGNED_PRESIGN`) for verification-doc exception flow.
+- Secure short-lived download slot for active verification docs (`/admin/storage/verification-docs/{id}/presign-download`).
+- STS-style brokered one-time grants for storage delegation (BROKERED_STS_V1): issue/upload/download + exchange flow (`/admin/storage/grants/*`).
+- Retention worker (`scripts/storage_retention_worker.py`) with MinIO hard-delete execution and failed-delete reporting.
+- Storage delete retry queue:
+  - monitor (`/superadmin/storage/delete-queue`)
+  - requeue (`/superadmin/storage/delete-queue/{job_id}/requeue`)
+  - run-once (`/superadmin/storage/delete-queue/run-once`)
+  - force-fail (`/superadmin/storage/delete-queue/{job_id}/fail-now`)
+- Audit trail persistence in `audit_log`.
+- Audit tamper-evident hash-chain (`chain_version`, `prev_hash`, `audit_hash`) + verification endpoint `/guard/admin/audit/verify`.
+- DB schema extensions for `device_leases`, `public_profile_settings`, `onboarding_applications`, `storage_object_meta`, `incidents`, `storage_grants`, `storage_delete_queue`, `guard_behavior_states`, `guard_bot_checks`, plus `tenants.vat_number` and `licenses.license_visual_code`.
+- Tenant incident/crash intake module (/admin/incidents) with superadmin triage workflow (/superadmin/incidents/*) and audit logging.
+- Profile foundation module (/profile/*): admin profile, workspace profile, role/user management with strict workspace scope rules.
+- I18N foundation module (/i18n/*, /admin/i18n/*, /superadmin/i18n/*): built-in catalogs + workspace locale policies.
+
+## Pending (next)
+- Rotate `STORAGE_GRANT_SECRET` via runbook procedure and periodic key policy review.
+- Real user/device registry with signed device attestation.
+- CI extension with lint/type/security scan gates.
+- Background workers (guard stale sweep scheduler, audit export).
+- Security hardening pass: key rotation workflow + lockout policy + abuse heuristics.
+- Support control plane (consent-based delegated access) module.

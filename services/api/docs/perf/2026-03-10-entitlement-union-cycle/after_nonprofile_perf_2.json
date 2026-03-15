@@ -1,0 +1,23 @@
+{
+    "ok":  true,
+    "profiling":  {
+                      "enabled":  false,
+                      "started_at":  "2026-03-10T20:40:36.170272+00:00",
+                      "filters":  {
+                                      "methods":  [
+                                                      "GET"
+                                                  ],
+                                      "path_prefixes":  [
+                                                            "/orders"
+                                                        ]
+                                  },
+                      "window_size":  4096,
+                      "total_requests":  0,
+                      "status_counts":  {
+
+                                        },
+                      "segments":  {
+
+                                   }
+                  }
+}
