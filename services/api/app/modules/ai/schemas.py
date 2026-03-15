@@ -362,3 +362,22 @@ class EidonTemplatePublishResponseDTO(BaseModel):
     no_raw_document_rule: str
     no_rollout_rule: str
     system_truth_rule: str
+
+
+class EidonQualitySummaryRowDTO(BaseModel):
+    template_fingerprint: str
+    event_count: int
+    total_confirmed_count: int
+    total_corrected_count: int
+    total_unresolved_count: int
+    human_confirmation_true_count: int
+    correction_rate: float | None = None
+    last_event_at: str | None = None
+
+
+class EidonQualitySummaryResponseDTO(BaseModel):
+    ok: bool
+    event_type: str
+    limit: int
+    rows: list[EidonQualitySummaryRowDTO] = Field(default_factory=list)
+    generated_at: str

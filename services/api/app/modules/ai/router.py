@@ -11,10 +11,12 @@ from app.db.session import get_db_session
 from app.modules.ai.order_document_intake_service import service as order_document_intake_service
 from app.modules.ai.order_draft_assist_service import service as order_draft_assist_service
 from app.modules.ai.order_intake_feedback_service import service as order_intake_feedback_service
+from app.modules.ai.order_quality_analysis_service import service as order_quality_analysis_service
 from app.modules.ai.order_template_publish_service import service as order_template_publish_service
 from app.modules.ai.order_template_review_service import service as order_template_review_service
 from app.modules.ai.order_template_submission_staging_service import service as order_template_submission_staging_service
 from app.modules.ai.schemas import (
+    EidonQualitySummaryResponseDTO,
     EidonOrderDocumentIntakeRequestDTO,
     EidonOrderDocumentIntakeResponseDTO,
     EidonOrderDraftAssistRequestDTO,
@@ -203,6 +205,35 @@ def tenant_copilot_template_submissions_stage(
             "review_required": out.staged_submission.review_required,
             "quality_score": out.staged_submission.quality_score,
             "authoritative_publish_allowed": out.authoritative_publish_allowed,
+        },
+    )
+    db.commit()
+    return out
+
+
+@router.get("/superadmin-copilot/quality-events/summary", response_model=EidonQualitySummaryResponseDTO)
+def superadmin_quality_events_summary(
+    event_type: str = "ORDER_INTAKE_FEEDBACK_V1",
+    limit: int = 50,
+    claims: dict[str, Any] = Depends(require_superadmin),
+    db: Session = Depends(get_db_session),
+) -> EidonQualitySummaryResponseDTO:
+    limit_norm = max(1, min(int(limit), 200))
+    out = order_quality_analysis_service.summarize(
+        db=db,
+        event_type=event_type,
+        limit=limit_norm,
+    )
+    write_audit(
+        db,
+        action="ai.superadmin_quality_events_summary",
+        actor=str(claims.get("sub") or "unknown"),
+        tenant_id=None,
+        target="ai/superadmin-copilot/quality-events/summary",
+        metadata={
+            "event_type": out.event_type,
+            "limit": out.limit,
+            "rows_count": len(out.rows),
         },
     )
     db.commit()
