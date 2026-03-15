@@ -8,6 +8,11 @@ from sqlalchemy.orm import Session
 from app.core.audit import write_audit
 from app.core.auth import require_claims, require_superadmin
 from app.db.session import get_db_session
+from app.modules.ai.eidon_orders_response_contract_v1 import (
+    EIDON_ORDERS_RESPONSE_CONTRACT_VIOLATION,
+    EIDON_ORDERS_RESPONSE_SURFACE_RETRIEVE_REFERENCE,
+    enforce_orders_response_contract_or_fail,
+)
 from app.modules.ai.order_document_intake_service import service as order_document_intake_service
 from app.modules.ai.order_draft_assist_service import service as order_draft_assist_service
 from app.modules.ai.order_retrieval_execution_service import service as order_retrieval_execution_service
@@ -207,6 +212,16 @@ def tenant_copilot_retrieve_order_reference(
         no_authoritative_finalize_rule="eidon_prepare_only_no_authoritative_finalize",
         system_truth_rule="ai_does_not_override_system_truth",
     )
+    try:
+        enforce_orders_response_contract_or_fail(
+            surface_code=EIDON_ORDERS_RESPONSE_SURFACE_RETRIEVE_REFERENCE,
+            response=out,
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        if detail != EIDON_ORDERS_RESPONSE_CONTRACT_VIOLATION:
+            raise
+        raise HTTPException(status_code=400, detail=detail) from exc
 
     write_audit(
         db,

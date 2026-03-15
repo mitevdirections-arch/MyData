@@ -4,6 +4,10 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.modules.ai.eidon_orders_response_contract_v1 import (
+    EIDON_ORDERS_RESPONSE_SURFACE_DRAFTING,
+    enforce_orders_response_contract_or_fail,
+)
 from app.modules.ai.order_retrieval_execution_service import (
     service as order_retrieval_execution_service,
 )
@@ -344,6 +348,10 @@ class EidonOrderDraftAssistService:
             system_truth_rule="ai_does_not_override_system_truth",
         )
         tenant_action_boundary_guard.enforce_advisory_only(out)
+        enforce_orders_response_contract_or_fail(
+            surface_code=EIDON_ORDERS_RESPONSE_SURFACE_DRAFTING,
+            response=out,
+        )
         return out
 
 

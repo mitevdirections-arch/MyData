@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import app.core.middleware as core_middleware
+import app.modules.ai.eidon_orders_response_contract_v1 as response_contract_mod
 import app.modules.ai.router as ai_router
 import app.modules.ai.tenant_retrieval_action_guard as guard_mod
 import app.modules.licensing.deps as licensing_deps
@@ -165,6 +166,37 @@ def test_ai_order_reference_retrieval_hidden_object_safe_deny_missing_vs_inacces
         assert (r_missing.json() or {}).get("detail") == guard_mod.OBJECT_REFERENCE_NOT_ACCESSIBLE
         assert (r_inaccessible.json() or {}).get("detail") == guard_mod.OBJECT_REFERENCE_NOT_ACCESSIBLE
         assert "ord-hidden-001" not in str((r_inaccessible.json() or {}).get("detail") or "")
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_ai_order_reference_retrieval_fail_closed_on_response_contract_violation(monkeypatch) -> None:
+    db = _FakeDB()
+    app.dependency_overrides[get_db_session] = lambda: db
+    monkeypatch.setattr(licensing_deps.licensing_service, "resolve_module_entitlement", _allow_entitlement)
+    monkeypatch.setattr(core_middleware.CoreEntitlementMiddleware, "_cache_get", lambda _self, _tenant_id, _now_mono: True)
+    monkeypatch.setattr(ai_router, "write_audit", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        ai_router.order_retrieval_execution_service,
+        "retrieve_order_reference",
+        lambda **_kwargs: _summary(order_id="ord-visible-001"),
+    )
+    monkeypatch.setattr(
+        ai_router,
+        "enforce_orders_response_contract_or_fail",
+        lambda **_kwargs: (_ for _ in ()).throw(ValueError(response_contract_mod.EIDON_ORDERS_RESPONSE_CONTRACT_VIOLATION)),
+    )
+
+    try:
+        client = TestClient(app)
+        token = _token(tenant_id="tenant-ai-001", perms=["AI.COPILOT"])
+        r = client.post(
+            "/ai/tenant-copilot/retrieve-order-reference",
+            headers=_headers(token),
+            json={"order_id": "ord-visible-001"},
+        )
+        assert r.status_code == 400, r.text
+        assert (r.json() or {}).get("detail") == response_contract_mod.EIDON_ORDERS_RESPONSE_CONTRACT_VIOLATION
     finally:
         app.dependency_overrides.clear()
 

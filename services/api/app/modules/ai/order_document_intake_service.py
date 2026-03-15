@@ -5,6 +5,10 @@ import json
 import re
 from typing import Any
 
+from app.modules.ai.eidon_orders_response_contract_v1 import (
+    EIDON_ORDERS_RESPONSE_SURFACE_DOCUMENT_UNDERSTANDING,
+    enforce_orders_response_contract_or_fail,
+)
 from app.modules.ai.schemas import (
     EidonExtractedFieldDTO,
     EidonOrderDraftCandidateDTO,
@@ -453,6 +457,10 @@ class EidonOrderDocumentIntakeService:
         )
         self._enforce_no_raw_output(out)
         tenant_action_boundary_guard.enforce_advisory_only(out)
+        enforce_orders_response_contract_or_fail(
+            surface_code=EIDON_ORDERS_RESPONSE_SURFACE_DOCUMENT_UNDERSTANDING,
+            response=out,
+        )
         return out
 
 

@@ -4,6 +4,10 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.modules.ai.eidon_orders_response_contract_v1 import (
+    EIDON_ORDERS_RESPONSE_SURFACE_COPILOT,
+    enforce_orders_response_contract_or_fail,
+)
 from app.modules.ai.eidon_capability_exposure_contract_v1 import is_copilot_routable_capability_or_fail
 from app.modules.ai.eidon_capability_registry_contract_v1 import (
     EIDON_CAPABILITY_AI_ORDERS_DOCUMENT_UNDERSTANDING,
@@ -127,7 +131,7 @@ class EidonOrdersCopilotOrchestrationService:
         if self._extract_authoritative_finalize_allowed(result):
             raise ValueError(ORDERS_COPILOT_AUTHORITATIVE_FINALIZE_VIOLATION)
 
-        return EidonOrdersCopilotResponseDTO(
+        out = EidonOrdersCopilotResponseDTO(
             ok=True,
             tenant_id=tenant_norm,
             capability="EIDON_ORDERS_COPILOT_ORCHESTRATION_V1",
@@ -140,6 +144,11 @@ class EidonOrdersCopilotOrchestrationService:
             no_action_execution_rule=DEFAULT_NO_ACTION_EXECUTION_RULE,
             system_truth_rule="ai_does_not_override_system_truth",
         )
+        enforce_orders_response_contract_or_fail(
+            surface_code=EIDON_ORDERS_RESPONSE_SURFACE_COPILOT,
+            response=out,
+        )
+        return out
 
 
 service = EidonOrdersCopilotOrchestrationService()
