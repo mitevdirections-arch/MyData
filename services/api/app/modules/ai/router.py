@@ -164,6 +164,48 @@ def tenant_copilot_order_draft_assist(
     claims: dict[str, Any] = Depends(require_claims),
     db: Session = Depends(get_db_session),
 ) -> EidonOrderDraftAssistResponseDTO:
+    return _run_tenant_order_drafting_surface(
+        payload=payload,
+        claims=claims,
+        db=db,
+        action_success="ai.tenant_order_draft_assist",
+        action_guard_deny="ai.tenant_order_draft_assist_guard_deny",
+        action_boundary_deny="ai.tenant_order_draft_assist_action_boundary_deny",
+        target="ai/tenant-copilot/order-draft-assist",
+        surface_marker="compatibility",
+    )
+
+
+@router.post("/tenant-copilot/order-drafting", response_model=EidonOrderDraftAssistResponseDTO)
+def tenant_copilot_order_drafting(
+    payload: EidonOrderDraftAssistRequestDTO,
+    _entitlement: dict[str, Any] = Depends(require_module_entitlement("AI_COPILOT")),
+    claims: dict[str, Any] = Depends(require_claims),
+    db: Session = Depends(get_db_session),
+) -> EidonOrderDraftAssistResponseDTO:
+    return _run_tenant_order_drafting_surface(
+        payload=payload,
+        claims=claims,
+        db=db,
+        action_success="ai.tenant_order_drafting",
+        action_guard_deny="ai.tenant_order_drafting_guard_deny",
+        action_boundary_deny="ai.tenant_order_drafting_action_boundary_deny",
+        target="ai/tenant-copilot/order-drafting",
+        surface_marker="canonical",
+    )
+
+
+def _run_tenant_order_drafting_surface(
+    *,
+    payload: EidonOrderDraftAssistRequestDTO,
+    claims: dict[str, Any],
+    db: Session,
+    action_success: str,
+    action_guard_deny: str,
+    action_boundary_deny: str,
+    target: str,
+    surface_marker: str,
+) -> EidonOrderDraftAssistResponseDTO:
     tenant_id = str(claims.get("tenant_id") or "").strip()
     actor = str(claims.get("sub") or "unknown")
     if not tenant_id:
@@ -177,27 +219,29 @@ def tenant_copilot_order_draft_assist(
         if detail == OBJECT_REFERENCE_NOT_ACCESSIBLE:
             write_audit(
                 db,
-                action="ai.tenant_order_draft_assist_guard_deny",
+                action=action_guard_deny,
                 actor=actor,
                 tenant_id=tenant_id,
-                target="ai/tenant-copilot/order-draft-assist",
+                target=target,
                 metadata={
                     "retrieval_action_guard": detail,
                     "retrieval_execution": "deny",
                     "retrieval_object_type": "order",
                     "retrieval_traceability": "summary_only",
+                    "order_drafting_surface": surface_marker,
                 },
             )
             db.commit()
         if detail == AI_ACTION_BOUNDARY_VIOLATION:
             write_audit(
                 db,
-                action="ai.tenant_order_draft_assist_action_boundary_deny",
+                action=action_boundary_deny,
                 actor=actor,
                 tenant_id=tenant_id,
-                target="ai/tenant-copilot/order-draft-assist",
+                target=target,
                 metadata={
                     "tenant_action_boundary": detail,
+                    "order_drafting_surface": surface_marker,
                 },
             )
             db.commit()
@@ -206,10 +250,10 @@ def tenant_copilot_order_draft_assist(
 
     write_audit(
         db,
-        action="ai.tenant_order_draft_assist",
+        action=action_success,
         actor=actor,
         tenant_id=tenant_id,
-        target="ai/tenant-copilot/order-draft-assist",
+        target=target,
         metadata={
             "missing_required_fields": len(out.missing_required_fields),
             "ambiguous_fields": len(out.ambiguous_fields),
@@ -222,6 +266,7 @@ def tenant_copilot_order_draft_assist(
             "retrieval_object_type": "order" if draft_context_path_used else "not_applicable",
             "retrieval_traceability": "summary_only" if draft_context_path_used else "not_applicable",
             "tenant_action_boundary": "advisory_only",
+            "order_drafting_surface": surface_marker,
         },
     )
     db.commit()

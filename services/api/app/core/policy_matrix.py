@@ -119,6 +119,7 @@ ROUTE_POLICY: dict[tuple[str, str], RoutePolicy] = {
     ("POST", "/ai/tenant-copilot"): RoutePolicy("AI.COPILOT", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("POST", "/ai/tenant-copilot/retrieve-order-reference"): RoutePolicy("AI.COPILOT", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("POST", "/ai/tenant-copilot/order-draft-assist"): RoutePolicy("AI.COPILOT", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
+    ("POST", "/ai/tenant-copilot/order-drafting"): RoutePolicy("AI.COPILOT", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("POST", "/ai/tenant-copilot/document-understanding"): RoutePolicy("AI.COPILOT", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("POST", "/ai/tenant-copilot/order-document-intake"): RoutePolicy("AI.COPILOT", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("POST", "/ai/tenant-copilot/order-intake-feedback"): RoutePolicy("AI.COPILOT", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
