@@ -9,6 +9,8 @@ from app.main import app
 
 
 def test_capability_registry_contract_contains_expected_entries_and_advisory_only() -> None:
+    assert capability_registry_mod.validate_registry_alignment_with_exposure_or_fail() is True
+
     expected_codes = {
         "AI.ORDERS.RETRIEVE_REFERENCE",
         "AI.ORDERS.DOCUMENT_UNDERSTANDING",

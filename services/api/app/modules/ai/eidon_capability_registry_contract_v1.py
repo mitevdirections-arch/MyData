@@ -6,6 +6,7 @@ from typing import Any
 EIDON_ORDERS_COPILOT_UNSUPPORTED_INTENT_CODE = "unsupported_orders_copilot_intent"
 EIDON_UNKNOWN_CAPABILITY_CODE = "unknown_eidon_capability_code"
 EIDON_UNKNOWN_CAPABILITY_ENDPOINT = "unknown_eidon_capability_endpoint"
+EIDON_CAPABILITY_REGISTRY_EXPOSURE_MISMATCH = "eidon_capability_registry_exposure_mismatch"
 
 ORDERS_COPILOT_INTENT_RETRIEVE_ORDER_REFERENCE = "retrieve_order_reference"
 ORDERS_COPILOT_INTENT_DOCUMENT_UNDERSTANDING = "document_understanding"
@@ -154,3 +155,12 @@ def resolve_capability_code_by_endpoint_path_or_fail(endpoint_path: str | None) 
         raise ValueError(EIDON_UNKNOWN_CAPABILITY_ENDPOINT)
     return capability_code
 
+
+def validate_registry_alignment_with_exposure_or_fail() -> bool:
+    from app.modules.ai.eidon_capability_exposure_contract_v1 import EIDON_CAPABILITY_EXPOSURE_REGISTRY_V1
+
+    registry_codes = set(EIDON_ORDERS_CAPABILITY_REGISTRY_V1.keys())
+    exposure_codes = set(EIDON_CAPABILITY_EXPOSURE_REGISTRY_V1.keys())
+    if registry_codes != exposure_codes:
+        raise ValueError(EIDON_CAPABILITY_REGISTRY_EXPOSURE_MISMATCH)
+    return True

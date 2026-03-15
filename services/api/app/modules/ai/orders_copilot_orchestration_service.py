@@ -4,6 +4,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.modules.ai.eidon_capability_exposure_contract_v1 import is_copilot_routable_capability_or_fail
 from app.modules.ai.eidon_capability_registry_contract_v1 import (
     EIDON_CAPABILITY_AI_ORDERS_DOCUMENT_UNDERSTANDING,
     EIDON_CAPABILITY_AI_ORDERS_DRAFTING,
@@ -28,6 +29,7 @@ from app.modules.ai.schemas import (
 
 UNSUPPORTED_ORDERS_COPILOT_INTENT = EIDON_ORDERS_COPILOT_UNSUPPORTED_INTENT_CODE
 ORDERS_COPILOT_AUTHORITATIVE_FINALIZE_VIOLATION = "orders_copilot_authoritative_finalize_violation"
+ORDERS_COPILOT_NON_ROUTABLE_CAPABILITY = "orders_copilot_non_routable_capability"
 DEFAULT_NO_ACTION_EXECUTION_RULE = "eidon_advisory_only_no_action_execution"
 SUPPORTED_ORDERS_COPILOT_INTENTS: tuple[str, ...] = EIDON_ORDERS_COPILOT_SUPPORTED_INTENTS
 
@@ -86,6 +88,8 @@ class EidonOrdersCopilotOrchestrationService:
 
         intent_norm = self._normalized(intent)
         capability_code = resolve_orders_copilot_capability_code_or_fail(intent_norm)
+        if not is_copilot_routable_capability_or_fail(capability_code):
+            raise ValueError(ORDERS_COPILOT_NON_ROUTABLE_CAPABILITY)
 
         payload_norm: dict[str, Any] = dict(payload or {})
 

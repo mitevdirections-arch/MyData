@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from app.modules.ai.eidon_capability_exposure_contract_v1 import (
+    is_copilot_routable_capability_or_fail,
+    is_orchestration_entrypoint_capability_or_fail,
+)
 from app.modules.ai.eidon_capability_registry_contract_v1 import (
     EIDON_ORDERS_COPILOT_SUPPORTED_INTENTS,
     EIDON_ORDERS_COPILOT_UNSUPPORTED_INTENT_CODE,
@@ -12,6 +16,7 @@ from app.modules.ai.eidon_capability_registry_contract_v1 import (
 )
 
 EIDON_ORDERS_COPILOT_INTENT_TO_CAPABILITY_CODE: dict[str, str] = dict(EIDON_ORDERS_INTENT_TO_CAPABILITY_CODE)
+ORDERS_COPILOT_INTENT_EXPOSURE_VIOLATION = "orders_copilot_intent_exposure_violation"
 
 EIDON_ORDERS_INTENT_CONTRACT_V1 = {
     "contract_code": "EIDON_ORDERS_INTENT_CONTRACT_V1",
@@ -45,4 +50,9 @@ def is_supported_orders_copilot_intent(intent: str | None) -> bool:
 
 
 def resolve_orders_copilot_capability_code_or_fail(intent: str | None) -> str:
-    return resolve_capability_code_by_intent_or_fail(normalize_orders_copilot_intent(intent))
+    capability_code = resolve_capability_code_by_intent_or_fail(normalize_orders_copilot_intent(intent))
+    if is_orchestration_entrypoint_capability_or_fail(capability_code):
+        raise ValueError(ORDERS_COPILOT_INTENT_EXPOSURE_VIOLATION)
+    if not is_copilot_routable_capability_or_fail(capability_code):
+        raise ValueError(ORDERS_COPILOT_INTENT_EXPOSURE_VIOLATION)
+    return capability_code
