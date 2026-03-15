@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy.orm import Session
+
+from app.modules.ai.order_quality_event_service import service as order_quality_event_service
 from app.modules.ai.schemas import (
     EidonFeedbackConfidenceAdjustmentDTO,
     EidonFeedbackConfirmedMappingDTO,
@@ -99,7 +102,7 @@ class EidonOrderIntakeFeedbackService:
         channel = str(metadata.confirmation_channel or "UNKNOWN")
         return f"tenant_feedback:channel={channel}"
 
-    def apply_feedback(self, *, tenant_id: str, payload: EidonOrderIntakeFeedbackRequestDTO) -> EidonOrderIntakeFeedbackResponseDTO:
+    def apply_feedback(self, *, db: Session, tenant_id: str, payload: EidonOrderIntakeFeedbackRequestDTO) -> EidonOrderIntakeFeedbackResponseDTO:
         draft = payload.proposed_draft_order_candidate
         warnings: list[str] = []
 
@@ -253,6 +256,22 @@ class EidonOrderIntakeFeedbackService:
             raw_tenant_document_included=False,
             submission_blocked_reason="global_submission_engine_not_enabled_in_this_cycle",
         )
+
+        try:
+            order_quality_event_service.write_order_intake_feedback_event(
+                db=db,
+                tenant_id=tenant_id,
+                template_fingerprint=payload.original_template_fingerprint,
+                confirmed_count=len(confirmed_mappings),
+                corrected_count=len(corrected_mappings),
+                unresolved_count=len(unresolved_mappings),
+                human_confirmation_recorded=human_confirmation_recorded,
+                confidence_adjustments=confidence_adjustments,
+            )
+        except ValueError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError("quality_event_persistence_failed") from exc
 
         return EidonOrderIntakeFeedbackResponseDTO(
             ok=True,

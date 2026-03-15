@@ -85,7 +85,28 @@ class EidonPatternPublishArtifact(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
 
 
+class EidonAIQualityEvent(Base):
+    __tablename__ = "eidon_ai_quality_events"
+    __table_args__ = (
+        Index("ix_eidon_ai_quality_events_tenant_created", "tenant_id", "created_at"),
+        Index("ix_eidon_ai_quality_events_type_created", "event_type", "created_at"),
+        Index("ix_eidon_ai_quality_events_fingerprint_created", "template_fingerprint", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, server_default=text("gen_random_uuid()"))
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False, default="ORDER_INTAKE_FEEDBACK_V1")
+    template_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    confirmed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    corrected_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    unresolved_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    human_confirmation_recorded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    confidence_adjustments_summary_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
+
+
 __all__ = [
     "EidonTemplateSubmissionStaging",
     "EidonPatternPublishArtifact",
+    "EidonAIQualityEvent",
 ]

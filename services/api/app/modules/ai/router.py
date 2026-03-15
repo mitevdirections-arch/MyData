@@ -146,7 +146,10 @@ def tenant_copilot_order_intake_feedback(
     if not tenant_id:
         raise HTTPException(status_code=403, detail="missing_tenant_context")
 
-    out = order_intake_feedback_service.apply_feedback(tenant_id=tenant_id, payload=payload)
+    try:
+        out = order_intake_feedback_service.apply_feedback(db=db, tenant_id=tenant_id, payload=payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     write_audit(
         db,
