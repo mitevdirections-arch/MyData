@@ -145,6 +145,7 @@ ROUTE_PLANE_OWNERSHIP: dict[tuple[str, str], str] = {
     ("POST", "/ai/tenant-copilot/document-understanding"): ROUTE_PLANE_OPERATIONAL,
     ("POST", "/ai/tenant-copilot/order-document-intake"): ROUTE_PLANE_OPERATIONAL,
     ("POST", "/ai/tenant-copilot/order-intake-feedback"): ROUTE_PLANE_OPERATIONAL,
+    ("POST", "/ai/tenant-copilot/order-feedback"): ROUTE_PLANE_OPERATIONAL,
     ("POST", "/ai/tenant-copilot/template-submissions/stage"): ROUTE_PLANE_OPERATIONAL,
     ("POST", "/guard/admin/bot/check-once"): ROUTE_PLANE_FOUNDATION,
     ("POST", "/guard/admin/bot/credentials/issue"): ROUTE_PLANE_FOUNDATION,

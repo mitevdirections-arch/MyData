@@ -376,6 +376,48 @@ def tenant_copilot_order_intake_feedback(
     claims: dict[str, Any] = Depends(require_claims),
     db: Session = Depends(get_db_session),
 ) -> EidonOrderIntakeFeedbackResponseDTO:
+    return _run_tenant_order_feedback_surface(
+        payload=payload,
+        claims=claims,
+        db=db,
+        action_success="ai.tenant_order_intake_feedback_loop",
+        action_guard_deny="ai.tenant_order_intake_feedback_guard_deny",
+        action_boundary_deny="ai.tenant_order_intake_feedback_action_boundary_deny",
+        target="ai/tenant-copilot/order-intake-feedback",
+        surface_marker="compatibility",
+    )
+
+
+@router.post("/tenant-copilot/order-feedback", response_model=EidonOrderIntakeFeedbackResponseDTO)
+def tenant_copilot_order_feedback(
+    payload: EidonOrderIntakeFeedbackRequestDTO,
+    _entitlement: dict[str, Any] = Depends(require_module_entitlement("AI_COPILOT")),
+    claims: dict[str, Any] = Depends(require_claims),
+    db: Session = Depends(get_db_session),
+) -> EidonOrderIntakeFeedbackResponseDTO:
+    return _run_tenant_order_feedback_surface(
+        payload=payload,
+        claims=claims,
+        db=db,
+        action_success="ai.tenant_order_feedback",
+        action_guard_deny="ai.tenant_order_feedback_guard_deny",
+        action_boundary_deny="ai.tenant_order_feedback_action_boundary_deny",
+        target="ai/tenant-copilot/order-feedback",
+        surface_marker="canonical",
+    )
+
+
+def _run_tenant_order_feedback_surface(
+    *,
+    payload: EidonOrderIntakeFeedbackRequestDTO,
+    claims: dict[str, Any],
+    db: Session,
+    action_success: str,
+    action_guard_deny: str,
+    action_boundary_deny: str,
+    target: str,
+    surface_marker: str,
+) -> EidonOrderIntakeFeedbackResponseDTO:
     tenant_id = str(claims.get("tenant_id") or "").strip()
     actor = str(claims.get("sub") or "unknown")
     if not tenant_id:
@@ -389,27 +431,29 @@ def tenant_copilot_order_intake_feedback(
         if detail == OBJECT_REFERENCE_NOT_ACCESSIBLE:
             write_audit(
                 db,
-                action="ai.tenant_order_intake_feedback_guard_deny",
+                action=action_guard_deny,
                 actor=actor,
                 tenant_id=tenant_id,
-                target="ai/tenant-copilot/order-intake-feedback",
+                target=target,
                 metadata={
                     "retrieval_action_guard": detail,
                     "retrieval_execution": "deny",
                     "retrieval_object_type": "order",
                     "retrieval_traceability": "summary_only",
+                    "order_feedback_surface": surface_marker,
                 },
             )
             db.commit()
         if detail == AI_ACTION_BOUNDARY_VIOLATION:
             write_audit(
                 db,
-                action="ai.tenant_order_intake_feedback_action_boundary_deny",
+                action=action_boundary_deny,
                 actor=actor,
                 tenant_id=tenant_id,
-                target="ai/tenant-copilot/order-intake-feedback",
+                target=target,
                 metadata={
                     "tenant_action_boundary": detail,
+                    "order_feedback_surface": surface_marker,
                 },
             )
             db.commit()
@@ -418,10 +462,10 @@ def tenant_copilot_order_intake_feedback(
 
     write_audit(
         db,
-        action="ai.tenant_order_intake_feedback_loop",
+        action=action_success,
         actor=actor,
         tenant_id=tenant_id,
-        target="ai/tenant-copilot/order-intake-feedback",
+        target=target,
         metadata={
             "confirmed_mappings": len(out.confirmed_mappings),
             "corrected_mappings": len(out.corrected_mappings),
@@ -434,6 +478,8 @@ def tenant_copilot_order_intake_feedback(
             "retrieval_object_type": "order" if feedback_reference_path_used else "not_applicable",
             "retrieval_traceability": "summary_only" if feedback_reference_path_used else "not_applicable",
             "tenant_action_boundary": "advisory_only",
+            "order_feedback_surface": surface_marker,
+            "order_feedback_traceability": "summary_only",
         },
     )
     db.commit()
