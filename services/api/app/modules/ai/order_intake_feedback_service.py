@@ -4,11 +4,13 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.modules.ai.order_retrieval_execution_service import (
+    service as order_retrieval_execution_service,
+)
 from app.modules.ai.order_quality_event_service import service as order_quality_event_service
 from app.modules.ai.tenant_retrieval_action_guard import (
     get_order_reference_from_feedback_payload,
     has_feedback_order_reference_path,
-    service as tenant_retrieval_action_guard,
 )
 from app.modules.ai.schemas import (
     EidonFeedbackConfidenceAdjustmentDTO,
@@ -18,6 +20,7 @@ from app.modules.ai.schemas import (
     EidonGlobalPatternSubmissionCandidateDTO,
     EidonOrderIntakeFeedbackRequestDTO,
     EidonOrderIntakeFeedbackResponseDTO,
+    EidonOrderRetrievalSummaryDTO,
     EidonSourceTraceabilityDTO,
     EidonTenantLocalLearningCandidateDTO,
 )
@@ -84,22 +87,22 @@ for _location_prefix in ("taking_over", "place_of_delivery"):
 
 
 class EidonOrderIntakeFeedbackService:
-    def _guard_feedback_order_reference(
+    def _retrieve_feedback_order_reference(
         self,
         *,
         db: Session,
         tenant_id: str,
         payload: EidonOrderIntakeFeedbackRequestDTO,
-    ) -> str:
+    ) -> EidonOrderRetrievalSummaryDTO | None:
         if not has_feedback_order_reference_path(payload):
-            return "not_applicable"
+            return None
         order_reference_id = get_order_reference_from_feedback_payload(payload)
-        out = tenant_retrieval_action_guard.validate_order_reference_access(
+        return order_retrieval_execution_service.retrieve_order_reference(
             db=db,
             tenant_id=tenant_id,
             order_reference_id=order_reference_id,
+            template_fingerprint=payload.original_template_fingerprint,
         )
-        return out.code
 
     def _path_value(self, model: Any, field_path: str) -> Any:
         node: Any = model
@@ -125,7 +128,7 @@ class EidonOrderIntakeFeedbackService:
         return f"tenant_feedback:channel={channel}"
 
     def apply_feedback(self, *, db: Session, tenant_id: str, payload: EidonOrderIntakeFeedbackRequestDTO) -> EidonOrderIntakeFeedbackResponseDTO:
-        self._guard_feedback_order_reference(
+        retrieval_summary = self._retrieve_feedback_order_reference(
             db=db,
             tenant_id=tenant_id,
             payload=payload,
@@ -140,6 +143,14 @@ class EidonOrderIntakeFeedbackService:
         source_traceability: list[EidonSourceTraceabilityDTO] = []
 
         source_ref = self._source_ref(payload.confirmation_metadata)
+        if retrieval_summary is not None:
+            source_traceability.append(
+                EidonSourceTraceabilityDTO(
+                    field_path="retrieval_context.order",
+                    source_class=retrieval_summary.retrieval_traceability.retrieval_class,
+                    source_ref=retrieval_summary.retrieval_traceability.retrieval_marker,
+                )
+            )
 
         confirmed_paths_seen: set[str] = set()
         for raw_path in payload.user_confirmed_fields:

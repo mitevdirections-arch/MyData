@@ -6,6 +6,7 @@ import app.modules.licensing.deps as licensing_deps
 from app.core.auth import create_access_token
 from app.db.session import get_db_session
 from app.main import app
+from app.modules.ai.schemas import EidonOrderRetrievalSummaryDTO, EidonRetrievalTraceabilityDTO
 from fastapi.testclient import TestClient
 
 
@@ -210,8 +211,18 @@ def test_ai_order_draft_assist_accepts_existing_order_context(monkeypatch) -> No
     monkeypatch.setattr(ai_router, "write_audit", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         ai_router.order_draft_assist_service,
-        "_guard_existing_order_reference",
-        lambda **_kwargs: "allow",
+        "_retrieve_existing_order_reference",
+        lambda **_kwargs: EidonOrderRetrievalSummaryDTO(
+            object_type="order",
+            object_id="ord-ai-ctx-1",
+            template_fingerprint=None,
+            retrieval_traceability=EidonRetrievalTraceabilityDTO(
+                retrieval_class="tenant_visible_order_reference_lookup",
+                retrieval_marker="summary_only_guarded_reference_lookup",
+                guard_outcome="allow",
+            ),
+            tenant_visible=True,
+        ),
     )
 
     payload = {

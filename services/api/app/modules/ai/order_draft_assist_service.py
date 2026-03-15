@@ -4,13 +4,15 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.modules.ai.order_retrieval_execution_service import (
+    service as order_retrieval_execution_service,
+)
 from app.modules.ai.tenant_retrieval_action_guard import (
-    OBJECT_REFERENCE_NOT_ACCESSIBLE,
     get_order_reference_from_existing_draft_context,
     has_existing_draft_context_path,
-    service as tenant_retrieval_action_guard,
 )
 from app.modules.ai.schemas import (
+    EidonOrderRetrievalSummaryDTO,
     EidonOrderDraftAssistRequestDTO,
     EidonOrderDraftAssistResponseDTO,
     EidonReadinessDTO,
@@ -68,24 +70,22 @@ _PLACEHOLDER_VALUES = {
 
 
 class EidonOrderDraftAssistService:
-    def _guard_existing_order_reference(
+    def _retrieve_existing_order_reference(
         self,
         *,
         db: Session,
         tenant_id: str,
         payload: EidonOrderDraftAssistRequestDTO,
-    ) -> str:
+    ) -> EidonOrderRetrievalSummaryDTO | None:
         if not has_existing_draft_context_path(payload):
-            return "not_applicable"
+            return None
         order_reference_id = get_order_reference_from_existing_draft_context(payload)
-        if not order_reference_id:
-            raise ValueError(OBJECT_REFERENCE_NOT_ACCESSIBLE)
-        out = tenant_retrieval_action_guard.validate_order_reference_access(
+        return order_retrieval_execution_service.retrieve_order_reference(
             db=db,
             tenant_id=tenant_id,
             order_reference_id=order_reference_id,
+            template_fingerprint=None,
         )
-        return out.code
 
     def _resolve_draft(self, payload: EidonOrderDraftAssistRequestDTO) -> tuple[OrderCreateRequestDTO, str]:
         if payload.order_draft_input is not None:
@@ -171,7 +171,7 @@ class EidonOrderDraftAssistService:
         )
 
     def assist(self, *, db: Session, tenant_id: str, payload: EidonOrderDraftAssistRequestDTO) -> EidonOrderDraftAssistResponseDTO:
-        self._guard_existing_order_reference(
+        retrieval_summary = self._retrieve_existing_order_reference(
             db=db,
             tenant_id=tenant_id,
             payload=payload,
@@ -209,6 +209,14 @@ class EidonOrderDraftAssistService:
                 source_ref="tenant_local_payload",
             )
         ]
+        if retrieval_summary is not None:
+            traces.append(
+                EidonSourceTraceabilityDTO(
+                    field_path="retrieval_context.order",
+                    source_class=retrieval_summary.retrieval_traceability.retrieval_class,
+                    source_ref=retrieval_summary.retrieval_traceability.retrieval_marker,
+                )
+            )
 
         goods_desc = self._path_value(draft, "goods.goods_description")
         reference_no = self._path_value(draft, "reference_no")

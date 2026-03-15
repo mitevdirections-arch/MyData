@@ -112,6 +112,9 @@ def tenant_copilot_order_draft_assist(
                 target="ai/tenant-copilot/order-draft-assist",
                 metadata={
                     "retrieval_action_guard": detail,
+                    "retrieval_execution": "deny",
+                    "retrieval_object_type": "order",
+                    "retrieval_traceability": "summary_only",
                 },
             )
             db.commit()
@@ -132,6 +135,9 @@ def tenant_copilot_order_draft_assist(
             "adr_applicable": out.adr_readiness.applicable,
             "authoritative_finalize_allowed": out.authoritative_finalize_allowed,
             "retrieval_action_guard": "allow" if draft_context_path_used else "not_applicable",
+            "retrieval_execution": "allow" if draft_context_path_used else "not_applicable",
+            "retrieval_object_type": "order" if draft_context_path_used else "not_applicable",
+            "retrieval_traceability": "summary_only" if draft_context_path_used else "not_applicable",
         },
     )
     db.commit()
@@ -200,6 +206,9 @@ def tenant_copilot_order_intake_feedback(
                 target="ai/tenant-copilot/order-intake-feedback",
                 metadata={
                     "retrieval_action_guard": detail,
+                    "retrieval_execution": "deny",
+                    "retrieval_object_type": "order",
+                    "retrieval_traceability": "summary_only",
                 },
             )
             db.commit()
@@ -220,6 +229,9 @@ def tenant_copilot_order_intake_feedback(
             "global_pattern_submission_candidate_eligible": out.global_pattern_submission_candidate.eligible,
             "authoritative_finalize_allowed": out.authoritative_finalize_allowed,
             "retrieval_action_guard": "allow" if feedback_reference_path_used else "not_applicable",
+            "retrieval_execution": "allow" if feedback_reference_path_used else "not_applicable",
+            "retrieval_object_type": "order" if feedback_reference_path_used else "not_applicable",
+            "retrieval_traceability": "summary_only" if feedback_reference_path_used else "not_applicable",
         },
     )
     db.commit()

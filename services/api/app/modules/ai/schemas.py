@@ -53,6 +53,20 @@ class EidonSourceTraceabilityDTO(BaseModel):
     source_ref: str
 
 
+class EidonRetrievalTraceabilityDTO(BaseModel):
+    retrieval_class: str
+    retrieval_marker: str
+    guard_outcome: str
+
+
+class EidonOrderRetrievalSummaryDTO(BaseModel):
+    object_type: str
+    object_id: str
+    template_fingerprint: str | None = None
+    retrieval_traceability: EidonRetrievalTraceabilityDTO
+    tenant_visible: bool
+
+
 class EidonOrderDraftAssistResponseDTO(BaseModel):
     ok: bool
     tenant_id: str

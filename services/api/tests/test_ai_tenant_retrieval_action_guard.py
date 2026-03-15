@@ -9,6 +9,7 @@ import app.modules.licensing.deps as licensing_deps
 from app.core.auth import create_access_token
 from app.db.session import get_db_session
 from app.main import app
+from app.modules.ai.schemas import EidonOrderRetrievalSummaryDTO, EidonRetrievalTraceabilityDTO
 from fastapi.testclient import TestClient
 
 
@@ -110,9 +111,19 @@ def test_draft_assist_guard_allow_valid_reference_no_success_regression(monkeypa
     monkeypatch.setattr(core_middleware.CoreEntitlementMiddleware, "_cache_get", lambda _self, _tenant_id, _now_mono: True)
     monkeypatch.setattr(ai_router, "write_audit", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
-        draft_assist_service_mod.tenant_retrieval_action_guard,
-        "validate_order_reference_access",
-        lambda **_kwargs: guard_mod.TenantRetrievalActionGuardResult(allowed=True, code="allow"),
+        draft_assist_service_mod.order_retrieval_execution_service,
+        "retrieve_order_reference",
+        lambda **_kwargs: EidonOrderRetrievalSummaryDTO(
+            object_type="order",
+            object_id="ord-visible-001",
+            template_fingerprint=None,
+            retrieval_traceability=EidonRetrievalTraceabilityDTO(
+                retrieval_class="tenant_visible_order_reference_lookup",
+                retrieval_marker="summary_only_guarded_reference_lookup",
+                guard_outcome="allow",
+            ),
+            tenant_visible=True,
+        ),
     )
 
     payload = {
@@ -139,7 +150,11 @@ def test_draft_assist_guard_allow_valid_reference_no_success_regression(monkeypa
         token = _token(tenant_id="tenant-ai-001", perms=["AI.COPILOT"])
         r = client.post("/ai/tenant-copilot/order-draft-assist", headers=_headers(token), json=payload)
         assert r.status_code == 200, r.text
-        assert (r.json() or {}).get("ok") is True
+        body = r.json() or {}
+        assert body.get("ok") is True
+        traces = body.get("source_traceability") or []
+        assert any((x or {}).get("field_path") == "retrieval_context.order" for x in traces)
+        assert "ord-visible-001" not in str(traces)
     finally:
         app.dependency_overrides.clear()
 
@@ -151,8 +166,8 @@ def test_draft_assist_guard_hidden_object_safe_deny_missing_vs_inaccessible(monk
     monkeypatch.setattr(core_middleware.CoreEntitlementMiddleware, "_cache_get", lambda _self, _tenant_id, _now_mono: True)
     monkeypatch.setattr(ai_router, "write_audit", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
-        draft_assist_service_mod.tenant_retrieval_action_guard,
-        "validate_order_reference_access",
+        draft_assist_service_mod.order_retrieval_execution_service,
+        "retrieve_order_reference",
         lambda **_kwargs: (_ for _ in ()).throw(ValueError(guard_mod.OBJECT_REFERENCE_NOT_ACCESSIBLE)),
     )
 
@@ -197,9 +212,19 @@ def test_feedback_guard_allow_valid_reference_no_success_regression(monkeypatch)
     monkeypatch.setattr(core_middleware.CoreEntitlementMiddleware, "_cache_get", lambda _self, _tenant_id, _now_mono: True)
     monkeypatch.setattr(ai_router, "write_audit", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
-        intake_feedback_service_mod.tenant_retrieval_action_guard,
-        "validate_order_reference_access",
-        lambda **_kwargs: guard_mod.TenantRetrievalActionGuardResult(allowed=True, code="allow"),
+        intake_feedback_service_mod.order_retrieval_execution_service,
+        "retrieve_order_reference",
+        lambda **_kwargs: EidonOrderRetrievalSummaryDTO(
+            object_type="order",
+            object_id="ord-visible-001",
+            template_fingerprint="tpl-fp-guard-001",
+            retrieval_traceability=EidonRetrievalTraceabilityDTO(
+                retrieval_class="tenant_visible_order_reference_lookup",
+                retrieval_marker="summary_only_guarded_reference_lookup",
+                guard_outcome="allow",
+            ),
+            tenant_visible=True,
+        ),
     )
 
     payload = {
@@ -215,7 +240,11 @@ def test_feedback_guard_allow_valid_reference_no_success_regression(monkeypatch)
         token = _token(tenant_id="tenant-ai-001", perms=["AI.COPILOT"])
         r = client.post("/ai/tenant-copilot/order-intake-feedback", headers=_headers(token), json=payload)
         assert r.status_code == 200, r.text
-        assert (r.json() or {}).get("ok") is True
+        body = r.json() or {}
+        assert body.get("ok") is True
+        traces = body.get("source_traceability") or []
+        assert any((x or {}).get("field_path") == "retrieval_context.order" for x in traces)
+        assert "ord-visible-001" not in str(traces)
     finally:
         app.dependency_overrides.clear()
 
@@ -227,8 +256,8 @@ def test_feedback_guard_hidden_object_safe_deny_missing_vs_inaccessible(monkeypa
     monkeypatch.setattr(core_middleware.CoreEntitlementMiddleware, "_cache_get", lambda _self, _tenant_id, _now_mono: True)
     monkeypatch.setattr(ai_router, "write_audit", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
-        intake_feedback_service_mod.tenant_retrieval_action_guard,
-        "validate_order_reference_access",
+        intake_feedback_service_mod.order_retrieval_execution_service,
+        "retrieve_order_reference",
         lambda **_kwargs: (_ for _ in ()).throw(ValueError(guard_mod.OBJECT_REFERENCE_NOT_ACCESSIBLE)),
     )
 
@@ -263,4 +292,3 @@ def test_feedback_guard_hidden_object_safe_deny_missing_vs_inaccessible(monkeypa
         assert "ord-hidden-111" not in str(inaccessible_detail or "")
     finally:
         app.dependency_overrides.clear()
-
