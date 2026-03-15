@@ -325,3 +325,40 @@ class EidonTemplateReviewDecisionResponseDTO(BaseModel):
     ok: bool
     decision: str
     submission: EidonTemplateReviewRecordDTO
+
+
+class EidonTemplatePublishRequestDTO(BaseModel):
+    publish_note: str | None = None
+    publish_shape_version: str = "v1"
+    rollback_from_submission_id: str | None = None
+
+
+class EidonPublishedPatternArtifactRecordDTO(BaseModel):
+    id: str
+    source_submission_id: str
+    tenant_id: str
+    source_capability: str
+    submission_shape_version: str
+    source_submission_status: str
+    pattern_version: str
+    template_fingerprint: str
+    quality_score: int
+    de_identified_pattern_features: dict[str, str | int | float | bool] = Field(default_factory=dict)
+    authoritative_publish_allowed: bool
+    rollback_capable: bool
+    rollback_from_submission_id: str | None = None
+    published_by: str
+    published_at: str
+    created_at: str
+    warnings: list[str] = Field(default_factory=list)
+
+
+class EidonTemplatePublishResponseDTO(BaseModel):
+    ok: bool
+    decision: str
+    artifact: EidonPublishedPatternArtifactRecordDTO
+    authoritative_publish_allowed: bool
+    no_authoritative_publish_rule: str
+    no_raw_document_rule: str
+    no_rollout_rule: str
+    system_truth_rule: str

@@ -31,6 +31,7 @@ DEFAULT_EXPECT_TABLES = [
     "payment_invoices",
     "orders",
     "guard_heartbeats",
+    "eidon_pattern_publish_artifacts",
 ]
 
 

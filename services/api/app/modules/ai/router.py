@@ -11,6 +11,7 @@ from app.db.session import get_db_session
 from app.modules.ai.order_document_intake_service import service as order_document_intake_service
 from app.modules.ai.order_draft_assist_service import service as order_draft_assist_service
 from app.modules.ai.order_intake_feedback_service import service as order_intake_feedback_service
+from app.modules.ai.order_template_publish_service import service as order_template_publish_service
 from app.modules.ai.order_template_review_service import service as order_template_review_service
 from app.modules.ai.order_template_submission_staging_service import service as order_template_submission_staging_service
 from app.modules.ai.schemas import (
@@ -22,6 +23,8 @@ from app.modules.ai.schemas import (
     EidonOrderIntakeFeedbackResponseDTO,
     EidonTemplateReviewDecisionRequestDTO,
     EidonTemplateReviewDecisionResponseDTO,
+    EidonTemplatePublishRequestDTO,
+    EidonTemplatePublishResponseDTO,
     EidonTemplateReviewQueueResponseDTO,
     EidonTemplateReviewReadResponseDTO,
     EidonTemplateSubmissionStagingRequestDTO,
@@ -319,6 +322,44 @@ def superadmin_template_submission_reject(
             "status": out.submission.status,
             "reviewed_by": out.submission.reviewed_by,
             "reviewed_at": out.submission.reviewed_at,
+        },
+    )
+    db.commit()
+    return out
+
+
+@router.post("/superadmin-copilot/template-submissions/{submission_id}/publish", response_model=EidonTemplatePublishResponseDTO)
+def superadmin_template_submission_publish(
+    submission_id: str,
+    payload: EidonTemplatePublishRequestDTO,
+    claims: dict[str, Any] = Depends(require_superadmin),
+    db: Session = Depends(get_db_session),
+) -> EidonTemplatePublishResponseDTO:
+    actor = str(claims.get("sub") or "unknown")
+    try:
+        out = order_template_publish_service.publish(
+            db=db,
+            submission_id=submission_id,
+            actor=actor,
+            payload=payload,
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 404 if detail == "submission_not_found" else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    write_audit(
+        db,
+        action="ai.superadmin_template_submission_publish",
+        actor=actor,
+        tenant_id=None,
+        target=f"ai/superadmin-copilot/template-submissions/{submission_id}/publish",
+        metadata={
+            "submission_id": submission_id,
+            "artifact_id": out.artifact.id,
+            "pattern_version": out.artifact.pattern_version,
+            "template_fingerprint": out.artifact.template_fingerprint,
+            "authoritative_publish_allowed": out.authoritative_publish_allowed,
+            "publish_not_rollout": True,
         },
     )
     db.commit()

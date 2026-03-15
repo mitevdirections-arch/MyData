@@ -19,7 +19,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 from app.db.model_parts.loader import MODEL_SPLIT_PREP_VERSION
-from app.db.model_parts.ai import EidonTemplateSubmissionStaging
+from app.db.model_parts.ai import EidonPatternPublishArtifact, EidonTemplateSubmissionStaging
 from app.db.model_parts.marketplace import MarketplaceModule, MarketplaceOffer
 from app.db.model_parts.payments import PaymentInvoice, PaymentInvoiceSequence, TenantCreditAccount
 from app.db.model_parts.support_onboarding_public import (

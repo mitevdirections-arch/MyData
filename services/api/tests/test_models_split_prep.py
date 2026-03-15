@@ -15,6 +15,7 @@ def test_app_db_models_entrypoint_stays_stable() -> None:
     assert hasattr(models, "TenantCreditAccount")
     assert hasattr(models, "PaymentInvoiceSequence")
     assert hasattr(models, "PaymentInvoice")
+    assert hasattr(models, "EidonPatternPublishArtifact")
 
 
 def test_models_import_side_effect_keeps_metadata_loaded() -> None:
@@ -39,6 +40,7 @@ def test_models_import_side_effect_keeps_metadata_loaded() -> None:
         "public_page_published",
         "marketplace_modules",
         "marketplace_offers",
+        "eidon_pattern_publish_artifacts",
     }
     missing = sorted(expected - table_names)
     assert missing == []
@@ -53,6 +55,7 @@ def test_representative_model_imports_remain_valid() -> None:
         MarketplaceOffer,
         OnboardingApplication,
         Order,
+        EidonPatternPublishArtifact,
         PaymentInvoice,
         PaymentInvoiceSequence,
         PublicBrandAsset,
@@ -86,6 +89,7 @@ def test_representative_model_imports_remain_valid() -> None:
 
     assert MarketplaceModule.__tablename__ == "marketplace_modules"
     assert MarketplaceOffer.__tablename__ == "marketplace_offers"
+    assert EidonPatternPublishArtifact.__tablename__ == "eidon_pattern_publish_artifacts"
 
 
 def test_model_parts_split_prep_scaffold_contract() -> None:
