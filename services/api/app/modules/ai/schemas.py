@@ -83,6 +83,25 @@ class EidonOrderReferenceRetrievalResponseDTO(BaseModel):
     system_truth_rule: str
 
 
+class EidonOrdersCopilotRequestDTO(BaseModel):
+    intent: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class EidonOrdersCopilotResponseDTO(BaseModel):
+    ok: bool
+    tenant_id: str
+    capability: str
+    intent: str
+    result: dict[str, Any] = Field(default_factory=dict)
+    authoritative_finalize_allowed: bool
+    warnings: list[str] = Field(default_factory=list)
+    source_traceability: EidonRetrievalTraceabilityDTO | list[EidonSourceTraceabilityDTO] | None = None
+    no_authoritative_finalize_rule: str
+    no_action_execution_rule: str
+    system_truth_rule: str
+
+
 class EidonOrderDraftAssistResponseDTO(BaseModel):
     ok: bool
     tenant_id: str

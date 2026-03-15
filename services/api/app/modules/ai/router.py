@@ -11,6 +11,9 @@ from app.db.session import get_db_session
 from app.modules.ai.order_document_intake_service import service as order_document_intake_service
 from app.modules.ai.order_draft_assist_service import service as order_draft_assist_service
 from app.modules.ai.order_retrieval_execution_service import service as order_retrieval_execution_service
+from app.modules.ai.orders_copilot_orchestration_service import (
+    service as orders_copilot_orchestration_service,
+)
 from app.modules.ai.order_pattern_activation_service import service as order_pattern_activation_service
 from app.modules.ai.order_runtime_enablement_service import service as order_runtime_enablement_service
 from app.modules.ai.order_runtime_decision_surface_service import service as order_runtime_decision_surface_service
@@ -42,6 +45,8 @@ from app.modules.ai.schemas import (
     EidonOrderDocumentIntakeResponseDTO,
     EidonOrderDraftAssistRequestDTO,
     EidonOrderDraftAssistResponseDTO,
+    EidonOrdersCopilotRequestDTO,
+    EidonOrdersCopilotResponseDTO,
     EidonOrderReferenceRetrievalRequestDTO,
     EidonOrderReferenceRetrievalResponseDTO,
     EidonOrderIntakeFeedbackRequestDTO,
@@ -88,6 +93,69 @@ def tenant_copilot(
         "policy": "advisory_only",
         "message": "Suggestion prepared under tenant policy constraints.",
     }
+
+
+@router.post("/tenant-copilot/orders-copilot", response_model=EidonOrdersCopilotResponseDTO)
+def tenant_copilot_orders_copilot(
+    payload: EidonOrdersCopilotRequestDTO,
+    _entitlement: dict[str, Any] = Depends(require_module_entitlement("AI_COPILOT")),
+    claims: dict[str, Any] = Depends(require_claims),
+    db: Session = Depends(get_db_session),
+) -> EidonOrdersCopilotResponseDTO:
+    tenant_id = str(claims.get("tenant_id") or "").strip()
+    actor = str(claims.get("sub") or "unknown")
+    if not tenant_id:
+        raise HTTPException(status_code=403, detail="missing_tenant_context")
+
+    intent_norm = str(payload.intent or "").strip()
+    retrieval_path = intent_norm == "retrieve_order_reference"
+
+    try:
+        out = orders_copilot_orchestration_service.orchestrate(
+            db=db,
+            tenant_id=tenant_id,
+            intent=intent_norm,
+            payload=payload.payload,
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        write_audit(
+            db,
+            action="ai.tenant_orders_copilot_deny",
+            actor=actor,
+            tenant_id=tenant_id,
+            target="ai/tenant-copilot/orders-copilot",
+            metadata={
+                "orders_copilot_surface": "canonical",
+                "orders_copilot_intent": intent_norm,
+                "orders_copilot_outcome": "deny",
+                "orders_copilot_deny_code": detail,
+                "orders_copilot_traceability": "summary_only",
+                "retrieval_object_type": "order" if retrieval_path else "not_applicable",
+            },
+        )
+        db.commit()
+        status_code = 403 if detail == OBJECT_REFERENCE_NOT_ACCESSIBLE else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+
+    write_audit(
+        db,
+        action="ai.tenant_orders_copilot",
+        actor=actor,
+        tenant_id=tenant_id,
+        target="ai/tenant-copilot/orders-copilot",
+        metadata={
+            "orders_copilot_surface": "canonical",
+            "orders_copilot_intent": out.intent,
+            "orders_copilot_outcome": "allow",
+            "orders_copilot_traceability": "summary_only",
+            "retrieval_object_type": "order" if out.intent == "retrieve_order_reference" else "not_applicable",
+            "authoritative_finalize_allowed": out.authoritative_finalize_allowed,
+            "warnings_count": len(out.warnings),
+        },
+    )
+    db.commit()
+    return out
 
 
 @router.post("/tenant-copilot/retrieve-order-reference", response_model=EidonOrderReferenceRetrievalResponseDTO)
