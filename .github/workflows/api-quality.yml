@@ -44,6 +44,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e .
+          pip install email-validator
           pip install pytest
       - name: Run tests
         env:
@@ -65,6 +66,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e .
+          pip install email-validator
       - name: Start CockroachDB (insecure)
         run: |
           docker run -d --name mydata-crdb -p 26257:26257 cockroachdb/cockroach:v25.1.0 \
@@ -103,6 +105,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e .
+          pip install email-validator
           pip install pytest
       - name: Start CockroachDB (insecure)
         run: |
@@ -148,6 +151,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e .
+          pip install email-validator
           pip install pytest
       - name: Start CockroachDB (insecure)
         run: |
@@ -192,6 +196,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e .
+          pip install email-validator
       - name: Run prod gate
         env:
           PYTHONPATH: .
@@ -214,6 +219,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e .
+          pip install email-validator
       - name: Start CockroachDB (insecure)
         run: |
           docker run -d --name mydata-crdb-opr -p 26257:26257 cockroachdb/cockroach:v25.1.0 \
@@ -278,6 +284,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e .
+          pip install email-validator
       - name: Run negative QA pack
         env:
           PYTHONPATH: .
