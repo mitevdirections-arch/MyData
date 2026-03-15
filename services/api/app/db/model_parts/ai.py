@@ -139,9 +139,49 @@ class EidonPatternDistributionRecord(Base):
     authoritative_publish_allowed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
+class EidonPatternRolloutGovernanceRecord(Base):
+    __tablename__ = "eidon_pattern_rollout_governance_records"
+    __table_args__ = (
+        CheckConstraint(
+            "governance_status = 'ROLLOUT_GOVERNANCE_RECORDED'",
+            name="ck_eidon_rollout_governance_status_v1",
+        ),
+        CheckConstraint(
+            "eligibility_decision IN ('ELIGIBLE','NOT_ELIGIBLE')",
+            name="ck_eidon_rollout_eligibility_decision_v1",
+        ),
+        Index("ix_eidon_rollout_gov_distribution_unique", "distribution_record_id", unique=True),
+        Index("ix_eidon_rollout_gov_tenant_recorded", "tenant_id", "recorded_at"),
+        Index("ix_eidon_rollout_gov_fingerprint_recorded", "template_fingerprint", "recorded_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, server_default=text("gen_random_uuid()"))
+    distribution_record_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("eidon_pattern_distribution_records.id"),
+        nullable=False,
+    )
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    template_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    pattern_version: Mapped[str] = mapped_column(String(32), nullable=False, default="v1-feedback")
+    governance_status: Mapped[str] = mapped_column(String(32), nullable=False, default="ROLLOUT_GOVERNANCE_RECORDED")
+    eligibility_decision: Mapped[str] = mapped_column(String(32), nullable=False)
+    governance_note: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    governance_meta_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    rollback_from_governance_record_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("eidon_pattern_rollout_governance_records.id"),
+        nullable=True,
+    )
+    recorded_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
+    authoritative_publish_allowed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
 __all__ = [
     "EidonTemplateSubmissionStaging",
     "EidonPatternPublishArtifact",
     "EidonAIQualityEvent",
     "EidonPatternDistributionRecord",
+    "EidonPatternRolloutGovernanceRecord",
 ]

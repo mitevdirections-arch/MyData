@@ -23,6 +23,7 @@ from app.db.model_parts.ai import (
     EidonAIQualityEvent,
     EidonPatternDistributionRecord,
     EidonPatternPublishArtifact,
+    EidonPatternRolloutGovernanceRecord,
     EidonTemplateSubmissionStaging,
 )
 from app.db.model_parts.marketplace import MarketplaceModule, MarketplaceOffer

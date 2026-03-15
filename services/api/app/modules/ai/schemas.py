@@ -399,6 +399,40 @@ class EidonPatternDistributionResponseDTO(BaseModel):
     system_truth_rule: str
 
 
+class EidonPatternRolloutGovernanceRequestDTO(BaseModel):
+    eligibility_decision: str
+    governance_note: str | None = None
+    governance_meta: dict[str, Any] | None = None
+
+
+class EidonPatternRolloutGovernanceRecordDTO(BaseModel):
+    id: str
+    distribution_record_id: str
+    tenant_id: str
+    template_fingerprint: str
+    pattern_version: str
+    governance_status: str
+    eligibility_decision: str
+    governance_note: str | None = None
+    governance_meta: dict[str, Any] = Field(default_factory=dict)
+    rollback_from_governance_record_id: str | None = None
+    recorded_by: str
+    recorded_at: str
+    authoritative_publish_allowed: bool
+
+
+class EidonPatternRolloutGovernanceResponseDTO(BaseModel):
+    ok: bool
+    decision: str
+    record: EidonPatternRolloutGovernanceRecordDTO
+    authoritative_publish_allowed: bool
+    no_authoritative_publish_rule: str
+    no_rollout_rule: str
+    no_activation_rule: str
+    no_tenant_runtime_mutation_rule: str
+    system_truth_rule: str
+
+
 class EidonQualitySummaryRowDTO(BaseModel):
     template_fingerprint: str
     event_count: int
