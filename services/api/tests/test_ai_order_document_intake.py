@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import app.core.middleware as core_middleware
+import app.modules.ai.order_document_intake_service as intake_service_mod
 import app.modules.ai.router as ai_router
 import app.modules.licensing.deps as licensing_deps
 from app.core.auth import create_access_token
 from app.db.session import get_db_session
 from app.main import app
+from app.modules.ai.tenant_action_boundary_guard import AI_ACTION_BOUNDARY_VIOLATION
 from fastapi.testclient import TestClient
 
 
@@ -143,6 +145,13 @@ Proper Shipping Name: PAINT
 
         assert body.get("authoritative_finalize_allowed") is False
         assert str(body.get("no_authoritative_finalize_rule") or "").strip() != ""
+        assert "extracted_text" not in body
+        assert "document_metadata" not in body
+        assert "layout_hints" not in body
+        assert "field_hints" not in body
+        dumped = str(body).lower()
+        assert "raw_document_blob" not in dumped
+        assert "raw_document_payload" not in dumped
 
         assert db.commits == 1
     finally:
@@ -189,6 +198,32 @@ Dangerous Goods: YES
         assert adr.get("applicable") is True
         assert adr.get("ready") is False
         assert "adr.un_number" in set(adr.get("missing_fields") or [])
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_ai_order_document_intake_action_boundary_violation_fail_closed(monkeypatch) -> None:
+    db = _FakeDB()
+    app.dependency_overrides[get_db_session] = lambda: db
+    monkeypatch.setattr(licensing_deps.licensing_service, "resolve_module_entitlement", _allow_entitlement)
+    monkeypatch.setattr(core_middleware.CoreEntitlementMiddleware, "_cache_get", lambda _self, _tenant_id, _now_mono: True)
+    monkeypatch.setattr(ai_router, "write_audit", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        intake_service_mod.tenant_action_boundary_guard,
+        "enforce_advisory_only",
+        lambda _out: (_ for _ in ()).throw(ValueError(AI_ACTION_BOUNDARY_VIOLATION)),
+    )
+
+    payload = {
+        "extracted_text": "Shipper: A",
+    }
+
+    try:
+        client = TestClient(app)
+        token = _token(tenant_id="tenant-ai-001", perms=["AI.COPILOT"])
+        denied = client.post("/ai/tenant-copilot/order-document-intake", headers=_headers(token), json=payload)
+        assert denied.status_code == 400, denied.text
+        assert (denied.json() or {}).get("detail") == AI_ACTION_BOUNDARY_VIOLATION
     finally:
         app.dependency_overrides.clear()
 

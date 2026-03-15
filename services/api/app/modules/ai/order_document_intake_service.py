@@ -104,6 +104,13 @@ _ALLOWED_FIELD_HINTS = set(_CMR_REQUIRED_FIELDS) | set(_ADR_REQUIRED_FIELDS) | {
     "adr.adr_notes",
 }
 
+_FORBIDDEN_DOCUMENT_OUTPUT_KEYS: set[str] = {
+    "extracted_text",
+    "raw_document_blob",
+    "raw_document_payload",
+    "document_blob",
+}
+
 
 class EidonOrderDocumentIntakeService:
     def _is_missing(self, value: Any) -> bool:
@@ -201,6 +208,27 @@ class EidonOrderDocumentIntakeService:
                 node[seg] = nxt
             node = nxt
         node[segments[-1]] = value
+
+    def _collect_forbidden_output_keys(self, value: Any, out: set[str]) -> None:
+        if isinstance(value, dict):
+            for raw_key, raw_val in value.items():
+                key_norm = str(raw_key or "").strip().lower()
+                if key_norm in _FORBIDDEN_DOCUMENT_OUTPUT_KEYS:
+                    out.add(key_norm)
+                self._collect_forbidden_output_keys(raw_val, out)
+            return
+        if isinstance(value, (list, tuple, set)):
+            for item in value:
+                self._collect_forbidden_output_keys(item, out)
+
+    def _enforce_no_raw_output(self, output: EidonOrderDocumentIntakeResponseDTO) -> None:
+        if bool(output.template_learning_candidate.raw_tenant_document_included):
+            raise ValueError("document_understanding_raw_output_violation")
+        serialized = output.model_dump(exclude_none=True)
+        violations: set[str] = set()
+        self._collect_forbidden_output_keys(serialized, violations)
+        if violations:
+            raise ValueError("document_understanding_raw_output_violation")
 
     def _extract_from_text(self, extracted_text: str) -> list[tuple[str, str | int | float | bool, float, str]]:
         out: list[tuple[str, str | int | float | bool, float, str]] = []
@@ -423,6 +451,7 @@ class EidonOrderDocumentIntakeService:
             no_authoritative_finalize_rule="eidon_prepare_only_no_authoritative_finalize",
             system_truth_rule="ai_does_not_override_system_truth",
         )
+        self._enforce_no_raw_output(out)
         tenant_action_boundary_guard.enforce_advisory_only(out)
         return out
 
