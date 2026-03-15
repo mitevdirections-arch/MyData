@@ -12,6 +12,7 @@ from app.modules.ai.order_document_intake_service import service as order_docume
 from app.modules.ai.order_draft_assist_service import service as order_draft_assist_service
 from app.modules.ai.order_pattern_activation_service import service as order_pattern_activation_service
 from app.modules.ai.order_runtime_enablement_service import service as order_runtime_enablement_service
+from app.modules.ai.order_runtime_decision_surface_service import service as order_runtime_decision_surface_service
 from app.modules.ai.order_intake_feedback_service import service as order_intake_feedback_service
 from app.modules.ai.order_pattern_distribution_service import service as order_pattern_distribution_service
 from app.modules.ai.order_pattern_rollout_governance_service import service as order_pattern_rollout_governance_service
@@ -19,6 +20,11 @@ from app.modules.ai.order_quality_analysis_service import service as order_quali
 from app.modules.ai.order_template_publish_service import service as order_template_publish_service
 from app.modules.ai.order_template_review_service import service as order_template_review_service
 from app.modules.ai.order_template_submission_staging_service import service as order_template_submission_staging_service
+from app.modules.ai.tenant_retrieval_action_guard import (
+    OBJECT_REFERENCE_NOT_ACCESSIBLE,
+    has_existing_draft_context_path,
+    has_feedback_order_reference_path,
+)
 from app.modules.ai.schemas import (
     EidonPatternDistributionRecordRequestDTO,
     EidonPatternDistributionResponseDTO,
@@ -29,6 +35,7 @@ from app.modules.ai.schemas import (
     EidonPatternRolloutGovernanceRequestDTO,
     EidonPatternRolloutGovernanceResponseDTO,
     EidonQualitySummaryResponseDTO,
+    EidonRuntimeDecisionSurfaceResponseDTO,
     EidonOrderDocumentIntakeRequestDTO,
     EidonOrderDocumentIntakeResponseDTO,
     EidonOrderDraftAssistRequestDTO,
@@ -91,7 +98,25 @@ def tenant_copilot_order_draft_assist(
     if not tenant_id:
         raise HTTPException(status_code=403, detail="missing_tenant_context")
 
-    out = order_draft_assist_service.assist(tenant_id=tenant_id, payload=payload)
+    draft_context_path_used = has_existing_draft_context_path(payload)
+    try:
+        out = order_draft_assist_service.assist(db=db, tenant_id=tenant_id, payload=payload)
+    except ValueError as exc:
+        detail = str(exc)
+        if detail == OBJECT_REFERENCE_NOT_ACCESSIBLE:
+            write_audit(
+                db,
+                action="ai.tenant_order_draft_assist_guard_deny",
+                actor=actor,
+                tenant_id=tenant_id,
+                target="ai/tenant-copilot/order-draft-assist",
+                metadata={
+                    "retrieval_action_guard": detail,
+                },
+            )
+            db.commit()
+        status_code = 403 if detail == OBJECT_REFERENCE_NOT_ACCESSIBLE else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
 
     write_audit(
         db,
@@ -106,6 +131,7 @@ def tenant_copilot_order_draft_assist(
             "adr_ready": out.adr_readiness.ready,
             "adr_applicable": out.adr_readiness.applicable,
             "authoritative_finalize_allowed": out.authoritative_finalize_allowed,
+            "retrieval_action_guard": "allow" if draft_context_path_used else "not_applicable",
         },
     )
     db.commit()
@@ -160,10 +186,25 @@ def tenant_copilot_order_intake_feedback(
     if not tenant_id:
         raise HTTPException(status_code=403, detail="missing_tenant_context")
 
+    feedback_reference_path_used = has_feedback_order_reference_path(payload)
     try:
         out = order_intake_feedback_service.apply_feedback(db=db, tenant_id=tenant_id, payload=payload)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        detail = str(exc)
+        if detail == OBJECT_REFERENCE_NOT_ACCESSIBLE:
+            write_audit(
+                db,
+                action="ai.tenant_order_intake_feedback_guard_deny",
+                actor=actor,
+                tenant_id=tenant_id,
+                target="ai/tenant-copilot/order-intake-feedback",
+                metadata={
+                    "retrieval_action_guard": detail,
+                },
+            )
+            db.commit()
+        status_code = 403 if detail == OBJECT_REFERENCE_NOT_ACCESSIBLE else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
 
     write_audit(
         db,
@@ -178,6 +219,7 @@ def tenant_copilot_order_intake_feedback(
             "human_confirmation_recorded": out.human_confirmation_recorded,
             "global_pattern_submission_candidate_eligible": out.global_pattern_submission_candidate.eligible,
             "authoritative_finalize_allowed": out.authoritative_finalize_allowed,
+            "retrieval_action_guard": "allow" if feedback_reference_path_used else "not_applicable",
         },
     )
     db.commit()
@@ -244,6 +286,32 @@ def superadmin_quality_events_summary(
         target="ai/superadmin-copilot/quality-events/summary",
         metadata={
             "event_type": out.event_type,
+            "limit": out.limit,
+            "rows_count": len(out.rows),
+        },
+    )
+    db.commit()
+    return out
+
+
+@router.get("/superadmin-copilot/runtime-decision-surface", response_model=EidonRuntimeDecisionSurfaceResponseDTO)
+def superadmin_runtime_decision_surface(
+    limit: int = 50,
+    claims: dict[str, Any] = Depends(require_superadmin),
+    db: Session = Depends(get_db_session),
+) -> EidonRuntimeDecisionSurfaceResponseDTO:
+    limit_norm = max(1, min(int(limit), 200))
+    out = order_runtime_decision_surface_service.summarize(
+        db=db,
+        limit=limit_norm,
+    )
+    write_audit(
+        db,
+        action="ai.superadmin_runtime_decision_surface",
+        actor=str(claims.get("sub") or "unknown"),
+        tenant_id=None,
+        target="ai/superadmin-copilot/runtime-decision-surface",
+        metadata={
             "limit": out.limit,
             "rows_count": len(out.rows),
         },

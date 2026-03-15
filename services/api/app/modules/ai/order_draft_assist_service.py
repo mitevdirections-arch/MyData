@@ -2,6 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy.orm import Session
+
+from app.modules.ai.tenant_retrieval_action_guard import (
+    OBJECT_REFERENCE_NOT_ACCESSIBLE,
+    get_order_reference_from_existing_draft_context,
+    has_existing_draft_context_path,
+    service as tenant_retrieval_action_guard,
+)
 from app.modules.ai.schemas import (
     EidonOrderDraftAssistRequestDTO,
     EidonOrderDraftAssistResponseDTO,
@@ -60,6 +68,25 @@ _PLACEHOLDER_VALUES = {
 
 
 class EidonOrderDraftAssistService:
+    def _guard_existing_order_reference(
+        self,
+        *,
+        db: Session,
+        tenant_id: str,
+        payload: EidonOrderDraftAssistRequestDTO,
+    ) -> str:
+        if not has_existing_draft_context_path(payload):
+            return "not_applicable"
+        order_reference_id = get_order_reference_from_existing_draft_context(payload)
+        if not order_reference_id:
+            raise ValueError(OBJECT_REFERENCE_NOT_ACCESSIBLE)
+        out = tenant_retrieval_action_guard.validate_order_reference_access(
+            db=db,
+            tenant_id=tenant_id,
+            order_reference_id=order_reference_id,
+        )
+        return out.code
+
     def _resolve_draft(self, payload: EidonOrderDraftAssistRequestDTO) -> tuple[OrderCreateRequestDTO, str]:
         if payload.order_draft_input is not None:
             return payload.order_draft_input, "order_draft_input"
@@ -143,7 +170,12 @@ class EidonOrderDraftAssistService:
             )
         )
 
-    def assist(self, *, tenant_id: str, payload: EidonOrderDraftAssistRequestDTO) -> EidonOrderDraftAssistResponseDTO:
+    def assist(self, *, db: Session, tenant_id: str, payload: EidonOrderDraftAssistRequestDTO) -> EidonOrderDraftAssistResponseDTO:
+        self._guard_existing_order_reference(
+            db=db,
+            tenant_id=tenant_id,
+            payload=payload,
+        )
         draft, context_source = self._resolve_draft(payload)
         focus = {str(x).strip() for x in (payload.focus_fields or []) if str(x).strip()}
 

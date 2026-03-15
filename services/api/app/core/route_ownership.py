@@ -128,6 +128,7 @@ ROUTE_PLANE_OWNERSHIP: dict[tuple[str, str], str] = {
     ("POST", "/admin/tenants/{tenant_id}/bootstrap-first-admin"): ROUTE_PLANE_FOUNDATION,
     ("POST", "/ai/superadmin-copilot"): ROUTE_PLANE_FOUNDATION,
     ("GET", "/ai/superadmin-copilot/quality-events/summary"): ROUTE_PLANE_FOUNDATION,
+    ("GET", "/ai/superadmin-copilot/runtime-decision-surface"): ROUTE_PLANE_FOUNDATION,
     ("GET", "/ai/superadmin-copilot/template-submissions/queue"): ROUTE_PLANE_FOUNDATION,
     ("GET", "/ai/superadmin-copilot/template-submissions/{submission_id}"): ROUTE_PLANE_FOUNDATION,
     ("POST", "/ai/superadmin-copilot/template-submissions/{submission_id}/approve"): ROUTE_PLANE_FOUNDATION,

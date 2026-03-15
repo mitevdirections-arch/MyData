@@ -5,6 +5,11 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.modules.ai.order_quality_event_service import service as order_quality_event_service
+from app.modules.ai.tenant_retrieval_action_guard import (
+    get_order_reference_from_feedback_payload,
+    has_feedback_order_reference_path,
+    service as tenant_retrieval_action_guard,
+)
 from app.modules.ai.schemas import (
     EidonFeedbackConfidenceAdjustmentDTO,
     EidonFeedbackConfirmedMappingDTO,
@@ -79,6 +84,23 @@ for _location_prefix in ("taking_over", "place_of_delivery"):
 
 
 class EidonOrderIntakeFeedbackService:
+    def _guard_feedback_order_reference(
+        self,
+        *,
+        db: Session,
+        tenant_id: str,
+        payload: EidonOrderIntakeFeedbackRequestDTO,
+    ) -> str:
+        if not has_feedback_order_reference_path(payload):
+            return "not_applicable"
+        order_reference_id = get_order_reference_from_feedback_payload(payload)
+        out = tenant_retrieval_action_guard.validate_order_reference_access(
+            db=db,
+            tenant_id=tenant_id,
+            order_reference_id=order_reference_id,
+        )
+        return out.code
+
     def _path_value(self, model: Any, field_path: str) -> Any:
         node: Any = model
         for seg in str(field_path).split("."):
@@ -103,6 +125,11 @@ class EidonOrderIntakeFeedbackService:
         return f"tenant_feedback:channel={channel}"
 
     def apply_feedback(self, *, db: Session, tenant_id: str, payload: EidonOrderIntakeFeedbackRequestDTO) -> EidonOrderIntakeFeedbackResponseDTO:
+        self._guard_feedback_order_reference(
+            db=db,
+            tenant_id=tenant_id,
+            payload=payload,
+        )
         draft = payload.proposed_draft_order_candidate
         warnings: list[str] = []
 

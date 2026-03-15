@@ -516,3 +516,23 @@ class EidonQualitySummaryResponseDTO(BaseModel):
     limit: int
     rows: list[EidonQualitySummaryRowDTO] = Field(default_factory=list)
     generated_at: str
+
+
+class EidonRuntimeDecisionSurfaceRowDTO(BaseModel):
+    template_fingerprint: str
+    pattern_version: str
+    publish_recorded: bool
+    distribution_recorded: bool
+    rollout_governance_recorded: bool
+    rollout_eligibility_decision: str | None = None
+    activation_recorded: bool
+    runtime_enablement_recorded: bool
+    runtime_decision: str | None = None
+    last_governance_event_at: str | None = None
+
+
+class EidonRuntimeDecisionSurfaceResponseDTO(BaseModel):
+    ok: bool
+    limit: int
+    rows: list[EidonRuntimeDecisionSurfaceRowDTO] = Field(default_factory=list)
+    generated_at: str

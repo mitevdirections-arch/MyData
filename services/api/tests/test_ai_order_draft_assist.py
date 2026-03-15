@@ -208,6 +208,11 @@ def test_ai_order_draft_assist_accepts_existing_order_context(monkeypatch) -> No
     monkeypatch.setattr(licensing_deps.licensing_service, "resolve_module_entitlement", _allow_entitlement)
     monkeypatch.setattr(core_middleware.CoreEntitlementMiddleware, "_cache_get", lambda _self, _tenant_id, _now_mono: True)
     monkeypatch.setattr(ai_router, "write_audit", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        ai_router.order_draft_assist_service,
+        "_guard_existing_order_reference",
+        lambda **_kwargs: "allow",
+    )
 
     payload = {
         "existing_order_draft_context": {
