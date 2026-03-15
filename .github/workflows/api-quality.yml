@@ -12,6 +12,10 @@ on:
       - '.github/workflows/**'
       - '.gitleaks.toml'
 
+env:
+  CI_DATABASE_URL: cockroachdb+psycopg://root@127.0.0.1:26257/defaultdb?sslmode=disable
+  CI_API_BASE: http://127.0.0.1:8100
+
 jobs:
   gitleaks:
     runs-on: ubuntu-latest
@@ -76,7 +80,7 @@ jobs:
       - name: Run migration smoke (forward-only)
         env:
           PYTHONPATH: .
-          DATABASE_URL: cockroachdb+psycopg://root@127.0.0.1:26257/defaultdb?sslmode=disable
+          DATABASE_URL: ${{ env.CI_DATABASE_URL }}
         run: python scripts/qa_migrations_smoke.py --strict
       - name: Stop CockroachDB
         if: always()
@@ -115,12 +119,12 @@ jobs:
       - name: Migrate schema
         env:
           PYTHONPATH: .
-          DATABASE_URL: cockroachdb+psycopg://root@127.0.0.1:26257/defaultdb?sslmode=disable
+          DATABASE_URL: ${{ env.CI_DATABASE_URL }}
         run: python -m alembic upgrade head
       - name: Run tenant isolation e2e
         env:
           PYTHONPATH: .
-          DATABASE_URL: cockroachdb+psycopg://root@127.0.0.1:26257/defaultdb?sslmode=disable
+          DATABASE_URL: ${{ env.CI_DATABASE_URL }}
           TENANT_ISOLATION_E2E_ENABLED: 'true'
         run: pytest -q tests/test_tenant_isolation_e2e.py
       - name: Stop CockroachDB
@@ -160,12 +164,12 @@ jobs:
       - name: Migrate schema
         env:
           PYTHONPATH: .
-          DATABASE_URL: cockroachdb+psycopg://root@127.0.0.1:26257/defaultdb?sslmode=disable
+          DATABASE_URL: ${{ env.CI_DATABASE_URL }}
         run: python -m alembic upgrade head
       - name: Run role separation e2e
         env:
           PYTHONPATH: .
-          DATABASE_URL: cockroachdb+psycopg://root@127.0.0.1:26257/defaultdb?sslmode=disable
+          DATABASE_URL: ${{ env.CI_DATABASE_URL }}
           ROLE_SEPARATION_E2E_ENABLED: 'true'
         run: pytest -q tests/test_role_separation_e2e.py
       - name: Stop CockroachDB
@@ -189,7 +193,73 @@ jobs:
       - name: Run prod gate
         env:
           PYTHONPATH: .
+          PROD_GATE_MIGRATIONS_SMOKE_ENABLED: 'true'
+          PROD_GATE_MIGRATIONS_SMOKE_DATABASE_URL: ${{ env.CI_DATABASE_URL }}
         run: python scripts/prod_gate.py
+
+  operational-readiness-required:
+    runs-on: ubuntu-latest
+    needs: [migrations-smoke, tenant-isolation-e2e, role-separation-e2e, prod-gate]
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Start CockroachDB (insecure)
+        run: |
+          docker run -d --name mydata-crdb-opr -p 26257:26257 cockroachdb/cockroach:v25.1.0 \
+            start-single-node --insecure --listen-addr=0.0.0.0 --http-addr=0.0.0.0:8080
+          for i in $(seq 1 40); do
+            if docker exec mydata-crdb-opr cockroach sql --insecure --host=127.0.0.1:26257 --execute="SELECT 1" >/dev/null 2>&1; then
+              echo "cockroach_ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "cockroach_not_ready" >&2
+          docker logs mydata-crdb-opr || true
+          exit 1
+      - name: Verify migration path (heads/current/upgrade/current + strict smoke)
+        env:
+          PYTHONPATH: .
+          DATABASE_URL: ${{ env.CI_DATABASE_URL }}
+        run: |
+          python -m alembic heads
+          python -m alembic current
+          python -m alembic upgrade head
+          python -m alembic current
+          python scripts/qa_migrations_smoke.py --strict
+      - name: Runtime readiness smoke
+        env:
+          PYTHONPATH: .
+          DATABASE_URL: ${{ env.CI_DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8100 >/tmp/api.log 2>&1 &
+          api_pid=$!
+          cleanup() {
+            kill $api_pid >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          for i in $(seq 1 60); do
+            if curl -fsS --max-time 8 "${{ env.CI_API_BASE }}/healthz" >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS --max-time 8 "${{ env.CI_API_BASE }}/healthz"
+          curl -fsS --max-time 8 "${{ env.CI_API_BASE }}/readyz"
+          curl -fsS --max-time 8 "${{ env.CI_API_BASE }}/healthz/db"
+      - name: Stop CockroachDB
+        if: always()
+        run: docker rm -f mydata-crdb-opr || true
 
   negative-qa:
     runs-on: ubuntu-latest

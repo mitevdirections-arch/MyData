@@ -94,6 +94,15 @@ $headers = @{ Authorization = "Bearer $($tok.access_token)" }
 - Do not commit `.env`.
 - Rotate all secrets for non-local environments.
 
+## CI required gate
+- Canonical required status check name: `operational-readiness-required`
+- Coverage contract:
+  - real DB migration verification (`alembic heads/current/upgrade/current`)
+  - `qa_migrations_smoke.py --strict`
+  - tenant isolation e2e + role separation e2e profiles
+  - runtime readiness probes (`/healthz`, `/readyz`, `/healthz/db`)
+  - `prod_gate.py`
+
 
 ## Unicode-path note (Windows)
 If your MyData path contains non-ASCII characters (for example localized OneDrive folders), some DB subprocess tools may fail to resolve cert file paths.
