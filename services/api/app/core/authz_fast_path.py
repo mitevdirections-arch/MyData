@@ -3,11 +3,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
+import time
 from typing import Any
 
-from sqlalchemy import and_
+from sqlalchemy import and_, bindparam, select
 from sqlalchemy.orm import Session
 
+from app.core.perf_profile import record_segment
 from app.core.permissions import dedupe_permissions, normalize_permission
 from app.db.models import WorkspaceRole, WorkspaceUser, WorkspaceUserEffectivePermission, WorkspaceUserRole
 
@@ -32,6 +35,56 @@ def _stable_hash(payload: dict[str, Any]) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _fast_path_breakdown_enabled() -> bool:
+    access_raw = str(os.getenv("MYDATA_PERF_ACCESS_BREAKDOWN", "0")).strip().lower()
+    if access_raw in {"1", "true", "yes", "on"}:
+        return True
+    raw = str(os.getenv("MYDATA_PERF_AUTHZ_FAST_PATH_BREAKDOWN", "0")).strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _access_db_split_enabled() -> bool:
+    raw = str(os.getenv("MYDATA_PERF_ACCESS_DB_SPLIT", "0")).strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _record_fast_path_breakdown(*, sql_ms: float, materialize_ms: float, shape_ms: float) -> None:
+    record_segment("tenant_db_authz_sql_ms", max(0.0, float(sql_ms)))
+    record_segment("tenant_db_authz_materialize_ms", max(0.0, float(materialize_ms)))
+    record_segment("tenant_db_authz_shape_ms", max(0.0, float(shape_ms)))
+
+
+_CANONICAL_EFFECTIVE_PERMISSIONS_STMT = (
+    select(
+        WorkspaceUser.employment_status,
+        WorkspaceUser.direct_permissions_json,
+        WorkspaceRole.permissions_json,
+    )
+    .select_from(WorkspaceUser)
+    .outerjoin(
+        WorkspaceUserRole,
+        and_(
+            WorkspaceUserRole.workspace_type == WorkspaceUser.workspace_type,
+            WorkspaceUserRole.workspace_id == WorkspaceUser.workspace_id,
+            WorkspaceUserRole.user_id == WorkspaceUser.user_id,
+        ),
+    )
+    .outerjoin(
+        WorkspaceRole,
+        and_(
+            WorkspaceRole.workspace_type == WorkspaceUserRole.workspace_type,
+            WorkspaceRole.workspace_id == WorkspaceUserRole.workspace_id,
+            WorkspaceRole.role_code == WorkspaceUserRole.role_code,
+        ),
+    )
+    .where(
+        WorkspaceUser.workspace_type == bindparam("workspace_type"),
+        WorkspaceUser.workspace_id == bindparam("workspace_id"),
+        WorkspaceUser.user_id == bindparam("user_id"),
+    )
+)
+
+
 def resolve_effective_permissions_from_canonical(
     db: Session,
     *,
@@ -39,37 +92,38 @@ def resolve_effective_permissions_from_canonical(
     workspace_id: str,
     user_id: str,
 ) -> dict[str, Any]:
-    rows = (
-        db.query(
-            WorkspaceUser.employment_status,
-            WorkspaceUser.direct_permissions_json,
-            WorkspaceRole.permissions_json,
-        )
-        .outerjoin(
-            WorkspaceUserRole,
-            and_(
-                WorkspaceUserRole.workspace_type == WorkspaceUser.workspace_type,
-                WorkspaceUserRole.workspace_id == WorkspaceUser.workspace_id,
-                WorkspaceUserRole.user_id == WorkspaceUser.user_id,
-            ),
-        )
-        .outerjoin(
-            WorkspaceRole,
-            and_(
-                WorkspaceRole.workspace_type == WorkspaceUserRole.workspace_type,
-                WorkspaceRole.workspace_id == WorkspaceUserRole.workspace_id,
-                WorkspaceRole.role_code == WorkspaceUserRole.role_code,
-            ),
-        )
-        .filter(
-            WorkspaceUser.workspace_type == workspace_type,
-            WorkspaceUser.workspace_id == workspace_id,
-            WorkspaceUser.user_id == user_id,
-        )
-        .all()
+    breakdown_enabled = _fast_path_breakdown_enabled()
+    split_enabled = _access_db_split_enabled()
+    sql_ms = 0.0
+    materialize_ms = 0.0
+    shape_ms = 0.0
+    checkout_ms = 0.0
+    exec_ms = 0.0
+
+    if split_enabled:
+        checkout_started = time.perf_counter()
+        db.connection()
+        checkout_ms = (time.perf_counter() - checkout_started) * 1000.0
+
+    sql_started = time.perf_counter()
+    rows = db.execute(
+        _CANONICAL_EFFECTIVE_PERMISSIONS_STMT,
+        {
+            "workspace_type": workspace_type,
+            "workspace_id": workspace_id,
+            "user_id": user_id,
+        },
     )
+    rows = rows.all()
+    exec_ms = (time.perf_counter() - sql_started) * 1000.0
+    sql_ms = max(0.0, float(checkout_ms + exec_ms)) if split_enabled else exec_ms
 
     if not rows:
+        if breakdown_enabled:
+            _record_fast_path_breakdown(sql_ms=sql_ms, materialize_ms=materialize_ms, shape_ms=shape_ms)
+            if split_enabled:
+                record_segment("tenant_db_authz_db_checkout_ms", max(0.0, float(checkout_ms)))
+                record_segment("tenant_db_authz_exec_ms", max(0.0, float(exec_ms)))
         return {
             "found": False,
             "workspace_type": workspace_type,
@@ -82,12 +136,17 @@ def resolve_effective_permissions_from_canonical(
             "source_hash_sha256": None,
         }
 
-    employment_status = str((rows[0][0] if rows[0] else "") or "").strip().upper()
-    direct_permissions = _normalize_permissions(list((rows[0][1] if rows[0] else None) or []))
-
+    materialize_started = time.perf_counter()
+    employment_status_raw = (rows[0][0] if rows[0] else "") or ""
+    direct_permissions_raw = list((rows[0][1] if rows[0] else None) or [])
     role_permissions_raw: list[str] = []
     for _status, _direct, role_perm_list in rows:
         role_permissions_raw.extend(list(role_perm_list or []))
+    materialize_ms = (time.perf_counter() - materialize_started) * 1000.0
+
+    shape_started = time.perf_counter()
+    employment_status = str(employment_status_raw).strip().upper()
+    direct_permissions = _normalize_permissions(direct_permissions_raw)
     role_permissions = _normalize_permissions(role_permissions_raw)
 
     if employment_status == ACTIVE_EMPLOYMENT_STATUS:
@@ -106,6 +165,12 @@ def resolve_effective_permissions_from_canonical(
             "effective_permissions": effective_permissions,
         }
     )
+    shape_ms = (time.perf_counter() - shape_started) * 1000.0
+    if breakdown_enabled:
+        _record_fast_path_breakdown(sql_ms=sql_ms, materialize_ms=materialize_ms, shape_ms=shape_ms)
+        if split_enabled:
+            record_segment("tenant_db_authz_db_checkout_ms", max(0.0, float(checkout_ms)))
+            record_segment("tenant_db_authz_exec_ms", max(0.0, float(exec_ms)))
 
     return {
         "found": True,
@@ -128,8 +193,18 @@ def resolve_effective_permissions_from_fast_path(
     user_id: str,
     required_source_version: int,
 ) -> dict[str, Any]:
+    breakdown_enabled = _fast_path_breakdown_enabled()
+    sql_ms = 0.0
+    materialize_ms = 0.0
+    shape_ms = 0.0
+
+    sql_started = time.perf_counter()
     row = (
-        db.query(WorkspaceUserEffectivePermission)
+        db.query(
+            WorkspaceUserEffectivePermission.employment_status,
+            WorkspaceUserEffectivePermission.effective_permissions_json,
+            WorkspaceUserEffectivePermission.source_version,
+        )
         .filter(
             WorkspaceUserEffectivePermission.workspace_type == workspace_type,
             WorkspaceUserEffectivePermission.workspace_id == workspace_id,
@@ -137,8 +212,11 @@ def resolve_effective_permissions_from_fast_path(
         )
         .first()
     )
+    sql_ms = (time.perf_counter() - sql_started) * 1000.0
 
     if row is None:
+        if breakdown_enabled:
+            _record_fast_path_breakdown(sql_ms=sql_ms, materialize_ms=materialize_ms, shape_ms=shape_ms)
         return {
             "found": False,
             "valid": False,
@@ -146,8 +224,17 @@ def resolve_effective_permissions_from_fast_path(
             "effective_permissions": [],
         }
 
-    row_version = int(getattr(row, "source_version", 0) or 0)
+    materialize_started = time.perf_counter()
+    employment_status_raw = row[0] if isinstance(row, tuple) else getattr(row, "employment_status", "")
+    raw_perms_obj = row[1] if isinstance(row, tuple) else getattr(row, "effective_permissions_json", None)
+    source_version_raw = row[2] if isinstance(row, tuple) else getattr(row, "source_version", 0)
+    row_version = int(source_version_raw or 0)
+    employment_status = str(employment_status_raw or "").strip().upper()
+    materialize_ms = (time.perf_counter() - materialize_started) * 1000.0
+
     if row_version != int(required_source_version):
+        if breakdown_enabled:
+            _record_fast_path_breakdown(sql_ms=sql_ms, materialize_ms=materialize_ms, shape_ms=shape_ms)
         return {
             "found": True,
             "valid": False,
@@ -156,8 +243,9 @@ def resolve_effective_permissions_from_fast_path(
             "source_version": row_version,
         }
 
-    employment_status = str(getattr(row, "employment_status", "") or "").strip().upper()
     if employment_status != ACTIVE_EMPLOYMENT_STATUS:
+        if breakdown_enabled:
+            _record_fast_path_breakdown(sql_ms=sql_ms, materialize_ms=materialize_ms, shape_ms=shape_ms)
         return {
             "found": True,
             "valid": True,
@@ -167,8 +255,9 @@ def resolve_effective_permissions_from_fast_path(
             "source_version": row_version,
         }
 
-    raw_perms = getattr(row, "effective_permissions_json", None)
-    if not isinstance(raw_perms, list):
+    if not isinstance(raw_perms_obj, list):
+        if breakdown_enabled:
+            _record_fast_path_breakdown(sql_ms=sql_ms, materialize_ms=materialize_ms, shape_ms=shape_ms)
         return {
             "found": True,
             "valid": False,
@@ -177,12 +266,18 @@ def resolve_effective_permissions_from_fast_path(
             "source_version": row_version,
         }
 
+    shape_started = time.perf_counter()
+    normalized_permissions = _normalize_permissions(raw_perms_obj)
+    shape_ms = (time.perf_counter() - shape_started) * 1000.0
+    if breakdown_enabled:
+        _record_fast_path_breakdown(sql_ms=sql_ms, materialize_ms=materialize_ms, shape_ms=shape_ms)
+
     return {
         "found": True,
         "valid": True,
         "reason": "ok",
         "employment_status": employment_status,
-        "effective_permissions": _normalize_permissions(raw_perms),
+        "effective_permissions": normalized_permissions,
         "source_version": row_version,
     }
 

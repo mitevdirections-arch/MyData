@@ -39,6 +39,16 @@ class _FakeQuery:
         return list(self._db.rows)
 
 
+class _FakeExecuteResult:
+    def __init__(self, db: "_FakeDB") -> None:
+        self._db = db
+
+    def all(self):
+        if self._db.raise_on_all:
+            raise RuntimeError("db_down")
+        return list(self._db.rows)
+
+
 class _FakeDB:
     def __init__(self, *, rows: list[tuple[str, list[str], list[str] | None]], raise_on_all: bool = False) -> None:
         self.rows = list(rows)
@@ -49,6 +59,10 @@ class _FakeDB:
     def query(self, *_args, **_kwargs):
         self.query_calls += 1
         return _FakeQuery(self)
+
+    def execute(self, *_args, **_kwargs):
+        self.query_calls += 1
+        return _FakeExecuteResult(self)
 
     def close(self) -> None:
         self.closed = True
@@ -230,7 +244,7 @@ def test_tenant_db_authz_fast_path_valid_row_is_used_when_enabled(monkeypatch) -
     assert captured.get("required_source_version") == 7
 
 
-def test_tenant_db_authz_fast_path_missing_or_invalid_row_denies(monkeypatch) -> None:
+def test_tenant_db_authz_fast_path_missing_or_invalid_row_falls_back_to_legacy(monkeypatch) -> None:
     _configure_fast_path_settings(monkeypatch, enabled=True, shadow=False, source_version=3)
 
     db = _CloseOnlyDB()
@@ -240,11 +254,11 @@ def test_tenant_db_authz_fast_path_missing_or_invalid_row_denies(monkeypatch) ->
 
     out = pm._tenant_db_effective_permissions(claims=_claims())
 
-    assert out == []
+    assert out == ["ORDERS.READ"]
     assert db.closed is True
 
 
-def test_tenant_db_authz_fast_path_shadow_mismatch_denies(monkeypatch) -> None:
+def test_tenant_db_authz_fast_path_shadow_mismatch_falls_back_to_legacy(monkeypatch) -> None:
     _configure_fast_path_settings(monkeypatch, enabled=True, shadow=True, source_version=1)
 
     db = _CloseOnlyDB()
@@ -254,11 +268,11 @@ def test_tenant_db_authz_fast_path_shadow_mismatch_denies(monkeypatch) -> None:
 
     out = pm._tenant_db_effective_permissions(claims=_claims())
 
-    assert out == []
+    assert out == ["ORDERS.WRITE"]
     assert db.closed is True
 
 
-def test_tenant_db_authz_shadow_mode_mismatch_denies_in_legacy_mode(monkeypatch) -> None:
+def test_tenant_db_authz_shadow_mode_mismatch_keeps_legacy_decision(monkeypatch) -> None:
     _configure_fast_path_settings(monkeypatch, enabled=False, shadow=True, source_version=1)
 
     db = _CloseOnlyDB()
@@ -268,7 +282,7 @@ def test_tenant_db_authz_shadow_mode_mismatch_denies_in_legacy_mode(monkeypatch)
 
     out = pm._tenant_db_effective_permissions(claims=_claims())
 
-    assert out == []
+    assert out == ["ORDERS.WRITE"]
     assert db.closed is True
 
 
@@ -283,5 +297,52 @@ def test_tenant_db_authz_shadow_mode_ignores_missing_fast_row_in_legacy_mode(mon
     out = pm._tenant_db_effective_permissions(claims=_claims())
 
     assert out == ["ORDERS.READ"]
+    assert db.closed is True
+
+
+def test_tenant_db_authz_fast_path_exception_falls_back_to_legacy(monkeypatch) -> None:
+    _configure_fast_path_settings(monkeypatch, enabled=True, shadow=False, source_version=1)
+
+    db = _CloseOnlyDB()
+    monkeypatch.setattr(pm, "get_session_factory", lambda: (lambda: db))
+
+    def _fast(**_kwargs):
+        raise RuntimeError("fast_path_unavailable")
+
+    monkeypatch.setattr(pm, "_tenant_db_effective_permissions_from_fast_path", _fast)
+    monkeypatch.setattr(pm, "_tenant_db_effective_permissions_from_canonical", lambda **_kwargs: ["ORDERS.READ"])
+
+    out = pm._tenant_db_effective_permissions(claims=_claims())
+
+    assert out == ["ORDERS.READ"]
+    assert db.closed is True
+
+
+def test_tenant_db_authz_fast_path_env_overrides_settings(monkeypatch) -> None:
+    _configure_fast_path_settings(monkeypatch, enabled=False, shadow=False, source_version=1)
+    monkeypatch.setenv("MYDATA_AUTHZ_FAST_PATH_ENABLED", "1")
+    monkeypatch.setenv("MYDATA_AUTHZ_FAST_PATH_SHADOW", "1")
+
+    db = _CloseOnlyDB()
+    monkeypatch.setattr(pm, "get_session_factory", lambda: (lambda: db))
+
+    calls: dict[str, int] = {"fast": 0, "canonical": 0}
+
+    def _fast(**_kwargs):
+        calls["fast"] += 1
+        return ["ORDERS.READ"], True
+
+    def _canonical(**_kwargs):
+        calls["canonical"] += 1
+        return ["ORDERS.READ"]
+
+    monkeypatch.setattr(pm, "_tenant_db_effective_permissions_from_fast_path", _fast)
+    monkeypatch.setattr(pm, "_tenant_db_effective_permissions_from_canonical", _canonical)
+
+    out = pm._tenant_db_effective_permissions(claims=_claims())
+
+    assert out == ["ORDERS.READ"]
+    assert calls["fast"] == 1
+    assert calls["canonical"] == 1
     assert db.closed is True
 

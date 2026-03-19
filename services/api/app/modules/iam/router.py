@@ -55,7 +55,6 @@ def me_access(
     claims: dict[str, Any] = Depends(require_claim_permission("IAM.READ")),
     db: Session = Depends(get_db_session),
 ) -> dict[str, Any]:
-    bind_rls_context(db, claims)
     try:
         out = service.me_access(db, claims=claims, workspace=workspace)
     except ValueError as exc:

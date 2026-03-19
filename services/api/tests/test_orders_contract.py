@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import OperationalError
 
 import app.core.policy_matrix as pm
 from app.core.auth import create_access_token
@@ -67,6 +68,38 @@ class _FakeDB:
 
     def commit(self) -> None:
         self.commits += 1
+
+    def rollback(self) -> None:
+        return None
+
+
+class _RetryOnceDB(_FakeDB):
+    def __init__(self) -> None:
+        super().__init__()
+        self.rollbacks = 0
+        self._failures_left = 1
+
+    def commit(self) -> None:
+        self.commits += 1
+        if self._failures_left > 0:
+            self._failures_left -= 1
+            raise OperationalError(None, None, Exception("restart transaction: RETRY_SERIALIZABLE"))
+
+    def rollback(self) -> None:
+        self.rollbacks += 1
+
+
+class _RetryAlwaysDB(_FakeDB):
+    def __init__(self) -> None:
+        super().__init__()
+        self.rollbacks = 0
+
+    def commit(self) -> None:
+        self.commits += 1
+        raise OperationalError(None, None, Exception("restart transaction: RETRY_SERIALIZABLE"))
+
+    def rollback(self) -> None:
+        self.rollbacks += 1
 
 
 def _token(*, tenant_id: str = "tenant-ref-001", sub: str = "owner@tenant.local") -> str:
@@ -354,5 +387,58 @@ def test_orders_list_detail_contract_and_boundary_types(monkeypatch) -> None:
 
         assert captured.get("list_query_type") == "OrdersListQueryDTO"
         assert captured.get("create_payload_type") == "OrderCreateRequestDTO"
+    finally:
+        app.dependency_overrides.pop(get_db_session, None)
+
+
+def test_orders_read_retryable_audit_conflict_returns_200_without_retry_loop(monkeypatch) -> None:
+    db = _RetryOnceDB()
+    app.dependency_overrides[get_db_session] = lambda: db
+
+    def _fake_get_order(_db, *, tenant_id: str, order_id: str) -> OrderDetailResponseDTO:
+        assert tenant_id == "tenant-ref-001"
+        return OrderDetailResponseDTO(
+            ok=True,
+            tenant_id=tenant_id,
+            order=_detail(order_id),
+            entitlement=_entitlement(),
+        )
+
+    monkeypatch.setattr(orders_router.service, "get_order", _fake_get_order)
+    monkeypatch.setattr(orders_router, "write_audit", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pm, "_tenant_db_effective_permissions", lambda *, claims: ["ORDERS.READ"])
+
+    try:
+        client = TestClient(app)
+        resp = client.get("/orders/ord-retry-serializable", headers=_headers())
+        assert resp.status_code == 200, resp.text
+        assert db.commits == 1
+        assert db.rollbacks == 1
+    finally:
+        app.dependency_overrides.pop(get_db_session, None)
+
+
+def test_orders_read_retryable_audit_conflict_exhausted_still_returns_200(monkeypatch) -> None:
+    db = _RetryAlwaysDB()
+    app.dependency_overrides[get_db_session] = lambda: db
+
+    def _fake_get_order(_db, *, tenant_id: str, order_id: str) -> OrderDetailResponseDTO:
+        assert tenant_id == "tenant-ref-001"
+        return OrderDetailResponseDTO(
+            ok=True,
+            tenant_id=tenant_id,
+            order=_detail(order_id),
+            entitlement=_entitlement(),
+        )
+
+    monkeypatch.setattr(orders_router.service, "get_order", _fake_get_order)
+    monkeypatch.setattr(orders_router, "write_audit", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pm, "_tenant_db_effective_permissions", lambda *, claims: ["ORDERS.READ"])
+    try:
+        client = TestClient(app)
+        resp = client.get("/orders/ord-retry-exhausted", headers=_headers())
+        assert resp.status_code == 200, resp.text
+        assert db.commits == 1
+        assert db.rollbacks == 1
     finally:
         app.dependency_overrides.pop(get_db_session, None)

@@ -3,10 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import os
 import re
 import uuid
 
-from sqlalchemy import and_, case, or_
+from sqlalchemy import and_, bindparam, case, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
@@ -25,9 +26,101 @@ CORE_PLAN_SEATS: dict[str, int] = {
 UNLIMITED_CORE_PLANS: set[str] = {"COREENTERPRISE", "CORE_ENT"}
 ALNUM_RE = re.compile(r"[^A-Z0-9]")
 ISSUANCE_MODES = {"AUTO", "SEMI", "MANUAL"}
+ENTITLEMENT_QUERY_MODE_ENV = "MYDATA_PERF_ENTITLEMENT_QUERY_MODE"
+ENTITLEMENT_QUERY_MODE_CORE = "core"
+ENTITLEMENT_QUERY_MODE_LEGACY = "legacy"
+
+_RESOLVE_MODULE_ENTITLEMENT_STMT = (
+    select(
+        License.license_type,
+        License.id,
+        License.valid_to,
+    )
+    .where(
+        License.tenant_id == bindparam("tenant_id"),
+        License.status == bindparam("active_status"),
+        License.valid_from <= bindparam("now_ts"),
+        License.valid_to >= bindparam("now_ts"),
+        or_(
+            License.license_type == bindparam("startup_type"),
+            and_(
+                License.module_code == bindparam("module_code"),
+                License.license_type != bindparam("core_type"),
+                License.license_type != bindparam("startup_type"),
+            ),
+        ),
+    )
+    .order_by(
+        case((License.license_type == bindparam("startup_type"), 0), else_=1),
+        License.valid_to.desc(),
+    )
+    .limit(1)
+)
 
 
 class LicensingService:
+    def _resolve_entitlement_query_mode(self) -> str:
+        raw = str(os.getenv(ENTITLEMENT_QUERY_MODE_ENV, ENTITLEMENT_QUERY_MODE_LEGACY)).strip().lower()
+        if raw == ENTITLEMENT_QUERY_MODE_CORE:
+            return ENTITLEMENT_QUERY_MODE_CORE
+        return ENTITLEMENT_QUERY_MODE_LEGACY
+
+    def _resolve_module_entitlement_row_legacy(
+        self,
+        db: Session,
+        *,
+        tenant_id: str,
+        module_code: str,
+        now: datetime,
+    ):
+        return (
+            db.query(
+                License.license_type,
+                License.id,
+                License.valid_to,
+            )
+            .filter(
+                License.tenant_id == tenant_id,
+                License.status == "ACTIVE",
+                License.valid_from <= now,
+                License.valid_to >= now,
+                or_(
+                    License.license_type == "STARTUP",
+                    and_(
+                        License.module_code == module_code,
+                        License.license_type != "CORE",
+                        License.license_type != "STARTUP",
+                    ),
+                ),
+            )
+            .order_by(
+                case((License.license_type == "STARTUP", 0), else_=1),
+                License.valid_to.desc(),
+            )
+            .first()
+        )
+
+    def _resolve_module_entitlement_row_core(
+        self,
+        db: Session,
+        *,
+        tenant_id: str,
+        module_code: str,
+        now: datetime,
+    ):
+        row = db.execute(
+            _RESOLVE_MODULE_ENTITLEMENT_STMT,
+            {
+                "tenant_id": tenant_id,
+                "active_status": "ACTIVE",
+                "now_ts": now,
+                "startup_type": "STARTUP",
+                "module_code": module_code,
+                "core_type": "CORE",
+            },
+        )
+        return row.first()
+
     def _active(self, now: datetime, record: License) -> bool:
         return record.status == "ACTIVE" and record.valid_from <= now <= record.valid_to
 
@@ -125,6 +218,32 @@ class LicensingService:
             "core_valid_to": core.valid_to.isoformat(),
         }
 
+    def _resolve_core_entitlement_from_active_catalog(self, active_licenses: list[dict[str, Any]]) -> dict[str, Any]:
+        core_row = next(
+            (
+                row
+                for row in list(active_licenses or [])
+                if str((row or {}).get("license_type") or "").strip().upper() == "CORE"
+            ),
+            None,
+        )
+        if core_row is None:
+            return {
+                "has_core": False,
+                "plan_code": None,
+                "seat_limit": None,
+                "core_valid_to": None,
+            }
+
+        plan_code = self._normalize_core_plan((core_row or {}).get("module_code"))
+        core_valid_to = str((core_row or {}).get("valid_to") or "").strip() or None
+        return {
+            "has_core": True,
+            "plan_code": plan_code,
+            "seat_limit": self._seat_limit_for_plan(plan_code),
+            "core_valid_to": core_valid_to,
+        }
+
     def resolve_module_entitlement(self, db: Session, tenant_id: str, module_code: str) -> dict:
         code = str(module_code or "").strip().upper()
         if not code:
@@ -137,33 +256,22 @@ class LicensingService:
             }
 
         now = datetime.now(timezone.utc)
+        query_mode = self._resolve_entitlement_query_mode()
         try:
-            row = (
-                db.query(
-                    License.license_type,
-                    License.id,
-                    License.valid_to,
+            if query_mode == ENTITLEMENT_QUERY_MODE_LEGACY:
+                row = self._resolve_module_entitlement_row_legacy(
+                    db,
+                    tenant_id=tenant_id,
+                    module_code=code,
+                    now=now,
                 )
-                .filter(
-                    License.tenant_id == tenant_id,
-                    License.status == "ACTIVE",
-                    License.valid_from <= now,
-                    License.valid_to >= now,
-                    or_(
-                        License.license_type == "STARTUP",
-                        and_(
-                            License.module_code == code,
-                            License.license_type != "CORE",
-                            License.license_type != "STARTUP",
-                        ),
-                    ),
+            else:
+                row = self._resolve_module_entitlement_row_core(
+                    db,
+                    tenant_id=tenant_id,
+                    module_code=code,
+                    now=now,
                 )
-                .order_by(
-                    case((License.license_type == "STARTUP", 0), else_=1),
-                    License.valid_to.desc(),
-                )
-                .first()
-            )
         except Exception:  # noqa: BLE001
             # Fail-closed for entitlement data-plane errors.
             return {
@@ -823,8 +931,8 @@ class LicensingService:
         }
 
     def entitlement_snapshot_v2(self, db: Session, *, tenant_id: str) -> dict:
-        core = self.resolve_core_entitlement(db=db, tenant_id=tenant_id)
         active = self.active_license_catalog(db=db, tenant_id=tenant_id)
+        core = self._resolve_core_entitlement_from_active_catalog(active)
 
         startup_active = any(str(x.get("license_type") or "").upper() == "STARTUP" for x in active)
         active_module_codes = sorted(

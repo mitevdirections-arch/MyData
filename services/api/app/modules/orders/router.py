@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import os
 import time
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.core.audit import write_audit
@@ -30,6 +32,22 @@ def _err_status(detail: str) -> int:
     if detail in {"core_required", "core_license_required", "module_license_required"}:
         return 402
     return 400
+
+
+def _is_retryable_txn_error(exc: OperationalError) -> bool:
+    msg = str(getattr(exc, "orig", exc) or exc).lower()
+    markers = (
+        "retry_serializable",
+        "restart transaction",
+        "transactionretry",
+        "serializationfailure",
+    )
+    return any(marker in msg for marker in markers)
+
+
+def _orders_breakdown_enabled() -> bool:
+    raw = str(os.getenv("MYDATA_PERF_ORDERS_BREAKDOWN", "0")).strip().lower()
+    return raw in {"1", "true", "yes", "on"}
 
 
 @router.get("", response_model=OrdersListResponseDTO)
@@ -113,13 +131,26 @@ def get_order(
         raise HTTPException(status_code=_err_status(detail), detail=detail) from exc
 
     row = out.order
-    write_audit(
-        db,
-        action="orders.read",
-        actor=actor,
-        tenant_id=tenant_id,
-        target=f"orders/{row.id}",
-        metadata={"order_no": row.order_no, "status": row.status},
-    )
-    db.commit()
-    return out
+    extra_sql_started = time.perf_counter()
+    try:
+        write_audit(
+            db,
+            action="orders.read",
+            actor=actor,
+            tenant_id=tenant_id,
+            target=f"orders/{row.id}",
+            metadata={"order_no": row.order_no, "status": row.status},
+        )
+        db.commit()
+        return out
+    except OperationalError as exc:
+        db.rollback()
+        if _is_retryable_txn_error(exc):
+            # Best-effort read audit under Cockroach retry pressure; never fail GET payload after successful read.
+            record_segment("orders_read_audit_retry_exhausted", 1.0)
+            return out
+        raise
+    finally:
+        if _orders_breakdown_enabled():
+            record_segment("orders_extra_sql_count", 1.0)
+            record_segment("orders_extra_sql_ms", (time.perf_counter() - extra_sql_started) * 1000.0)

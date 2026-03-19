@@ -6,11 +6,12 @@ from datetime import datetime, timezone
 import hashlib
 import hmac
 import json
+import os
 import time
 from typing import Any
 from uuid import UUID
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 
 from app.core.permissions import effective_permissions_from_claims, is_permission_allowed, normalize_permission
 from app.core.settings import get_settings
@@ -23,6 +24,58 @@ class AuthError(HTTPException):
 
 
 _CURRENT_CLAIMS: ContextVar[dict[str, Any] | None] = ContextVar("mydata_current_claims", default=None)
+_REQUEST_AUTHZ_CACHE_ATTR = "_mydata_request_authz_cache"
+_AUTH_CONTEXT_CLAIMS_ATTR = "claims"
+_AUTH_CONTEXT_TOKEN_FP_ATTR = "_mydata_verified_bearer_token_fingerprint"
+
+
+def _protected_envelope_breakdown_enabled() -> bool:
+    raw = str(os.getenv("MYDATA_PERF_PROTECTED_ENVELOPE_BREAKDOWN", "0")).strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _request_authz_cache_enabled() -> bool:
+    raw = str(os.getenv("MYDATA_PERF_REQUEST_AUTHZ_CACHE", "1")).strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _claims_signature(claims: dict[str, Any]) -> tuple[str, str, str]:
+    sub = str(claims.get("sub") or "").strip()
+    tenant_id = str(claims.get("tenant_id") or "").strip()
+    roles = sorted(str(x).strip().upper() for x in list(claims.get("roles") or []) if str(x).strip())
+    return sub, tenant_id, "|".join(roles)
+
+
+def _request_authz_cache_get(request: Request) -> dict[str, Any]:
+    cache = getattr(request.state, _REQUEST_AUTHZ_CACHE_ATTR, None)
+    if not isinstance(cache, dict):
+        cache = {}
+        setattr(request.state, _REQUEST_AUTHZ_CACHE_ATTR, cache)
+    return cache
+
+
+def _single_verify_enabled() -> bool:
+    raw = str(os.getenv("MYDATA_PERF_SINGLE_VERIFY", "1")).strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _token_fingerprint(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _verified_claims_from_request_state(request: Request, token: str) -> dict[str, Any] | None:
+    if not _single_verify_enabled():
+        return None
+
+    claims = getattr(request.state, _AUTH_CONTEXT_CLAIMS_ATTR, None)
+    token_fp = getattr(request.state, _AUTH_CONTEXT_TOKEN_FP_ATTR, None)
+    if not isinstance(claims, dict):
+        return None
+    if not isinstance(token_fp, str):
+        return None
+    if token_fp != _token_fingerprint(token):
+        return None
+    return claims
 
 
 def set_current_claims(claims: dict[str, Any] | None) -> Token:
@@ -195,11 +248,22 @@ def is_superadmin_step_up_code_valid(code: str | None, *, now_ts: int | None = N
 
 
 def require_claims(
+    request: Request,
     authorization: str | None = Header(default=None, alias="Authorization"),
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
 ) -> dict[str, Any]:
+    breakdown_enabled = _protected_envelope_breakdown_enabled()
+    claims_prepare_started = time.perf_counter()
+
     token = _extract_bearer(authorization)
-    claims = verify_access_token(token)
+    claims = _verified_claims_from_request_state(request, token)
+    token_verify_ms = 0.0
+    if claims is None:
+        token_verify_started = time.perf_counter()
+        claims = verify_access_token(token)
+        token_verify_ms = (time.perf_counter() - token_verify_started) * 1000.0
+        setattr(request.state, _AUTH_CONTEXT_CLAIMS_ATTR, claims)
+        setattr(request.state, _AUTH_CONTEXT_TOKEN_FP_ATTR, _token_fingerprint(token))
 
     # Defense-in-depth: optional tenant header must match token tenant.
     if x_tenant_id:
@@ -207,6 +271,11 @@ def require_claims(
         hdr_tenant = str(x_tenant_id or "").strip()
         if token_tenant and hdr_tenant and token_tenant != hdr_tenant:
             raise HTTPException(status_code=403, detail="tenant_context_mismatch")
+
+    if breakdown_enabled:
+        claims_prepare_total_ms = (time.perf_counter() - claims_prepare_started) * 1000.0
+        record_segment("protected_token_verify_ms", max(0.0, float(token_verify_ms)))
+        record_segment("protected_claims_prepare_ms", max(0.0, float(claims_prepare_total_ms - token_verify_ms)))
 
     set_current_claims(claims)
     return claims
@@ -219,17 +288,32 @@ def require_superadmin(claims: dict[str, Any] = Depends(require_claims)) -> dict
     return claims
 
 
-def ensure_tenant_scope_claims(claims: dict[str, Any]) -> str:
+def ensure_tenant_scope_claims(claims: dict[str, Any], *, request: Request | None = None) -> str:
+    if request is not None and _request_authz_cache_enabled():
+        cache = _request_authz_cache_get(request)
+        cached_sig = cache.get("tenant_scope_claims_signature")
+        cached_tenant_id = cache.get("tenant_scope_tenant_id")
+        if isinstance(cached_sig, tuple) and isinstance(cached_tenant_id, str):
+            if cached_sig == _claims_signature(claims):
+                return cached_tenant_id
+
     tenant_id = str(claims.get("tenant_id") or "").strip()
     if not tenant_id:
         raise HTTPException(status_code=403, detail="missing_tenant_context")
 
     _require_superadmin_support_scope(claims, tenant_id=tenant_id)
+    if request is not None and _request_authz_cache_enabled():
+        cache = _request_authz_cache_get(request)
+        cache["tenant_scope_claims_signature"] = _claims_signature(claims)
+        cache["tenant_scope_tenant_id"] = tenant_id
     return tenant_id
 
 
-def require_tenant_context(claims: dict[str, Any] = Depends(require_claims)) -> dict[str, Any]:
-    ensure_tenant_scope_claims(claims)
+def require_tenant_context(
+    request: Request,
+    claims: dict[str, Any] = Depends(require_claims),
+) -> dict[str, Any]:
+    ensure_tenant_scope_claims(claims, request=request)
     return claims
 
 
@@ -241,15 +325,20 @@ def require_tenant_admin(claims: dict[str, Any] = Depends(require_tenant_context
 
 
 def enforce_permissions(claims: dict[str, Any], required: list[str] | tuple[str, ...], *, any_of: bool = False) -> list[str]:
+    policy_started = time.perf_counter()
     wanted = [normalize_permission(x) for x in list(required or []) if normalize_permission(x)]
     if not wanted:
         raise HTTPException(status_code=500, detail="permission_policy_invalid")
 
-    effective = effective_permissions_from_claims(claims)
-    allowed = any(is_permission_allowed(code, effective) for code in wanted) if any_of else all(is_permission_allowed(code, effective) for code in wanted)
-    if not allowed:
-        raise HTTPException(status_code=403, detail="permission_required:" + ",".join(wanted))
-    return effective
+    try:
+        effective = effective_permissions_from_claims(claims)
+        allowed = any(is_permission_allowed(code, effective) for code in wanted) if any_of else all(is_permission_allowed(code, effective) for code in wanted)
+        if not allowed:
+            raise HTTPException(status_code=403, detail="permission_required:" + ",".join(wanted))
+        return effective
+    finally:
+        if _protected_envelope_breakdown_enabled():
+            record_segment("protected_policy_ms", (time.perf_counter() - policy_started) * 1000.0)
 
 
 def enforce_permission(claims: dict[str, Any], permission_code: str) -> list[str]:

@@ -6,13 +6,15 @@ from pathlib import Path
 import time
 
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.auth import get_current_claims
+from app.core.perf_profile import get_recorded_segment, record_segment
+from app.core.perf_profile import is_request_profile_active
+from app.core.perf_sql_trace import get_sql_trace_zone, is_sql_trace_enabled
 from app.core.rls import bind_rls_context
 from app.core.settings import get_settings
-from app.core.perf_profile import record_segment
 
 
 # Load .env from services/api root once at import time.
@@ -27,10 +29,15 @@ def _database_url() -> str:
     return url
 
 
+def _protected_envelope_breakdown_enabled() -> bool:
+    raw = str(os.getenv("MYDATA_PERF_PROTECTED_ENVELOPE_BREAKDOWN", "0")).strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 @lru_cache
 def get_engine():
     s = get_settings()
-    return create_engine(
+    engine = create_engine(
         _database_url(),
         pool_pre_ping=True,
         future=True,
@@ -40,6 +47,41 @@ def get_engine():
         pool_recycle=max(60, int(s.db_pool_recycle_seconds)),
         connect_args={"connect_timeout": 5},
     )
+    _install_perf_sql_trace(engine)
+    return engine
+
+
+def _install_perf_sql_trace(engine) -> None:
+    if getattr(engine, "_mydata_perf_sql_trace_installed", False):
+        return
+
+    @event.listens_for(engine, "before_cursor_execute")
+    def _before_cursor_execute(conn, _cursor, _statement, _parameters, _context, _executemany):  # noqa: ANN001
+        if not is_sql_trace_enabled() or not is_request_profile_active():
+            return
+        stack = conn.info.setdefault("_mydata_perf_sql_trace_stack", [])
+        stack.append(time.perf_counter())
+
+    @event.listens_for(engine, "after_cursor_execute")
+    def _after_cursor_execute(conn, _cursor, _statement, _parameters, _context, _executemany):  # noqa: ANN001
+        if not is_sql_trace_enabled() or not is_request_profile_active():
+            return
+
+        stack = conn.info.get("_mydata_perf_sql_trace_stack")
+        if not isinstance(stack, list) or not stack:
+            return
+
+        started = stack.pop()
+        elapsed_ms = (time.perf_counter() - float(started)) * 1000.0
+        record_segment("sql_query_count", 1.0)
+        record_segment("sql_query_ms", elapsed_ms)
+
+        zone = get_sql_trace_zone()
+        if zone:
+            record_segment(f"sql_query_count_{zone}", 1.0)
+            record_segment(f"sql_query_ms_{zone}", elapsed_ms)
+
+    setattr(engine, "_mydata_perf_sql_trace_installed", True)
 
 
 @lru_cache
@@ -109,6 +151,18 @@ def get_db_session():
         dependency_total_ms = (time.perf_counter() - dependency_started) * 1000.0
         known_ms = session_open_ms + connection_acquire_ms + session_timeout_setup_ms + rls_bind_ms
         record_segment("dependency_overhead_ms", max(0.0, dependency_total_ms - known_ms))
+        if _protected_envelope_breakdown_enabled() and is_request_profile_active():
+            protected_session_acquire_ms = max(0.0, float(known_ms))
+            existing_session_ms = get_recorded_segment("protected_session_acquire_ms")
+            record_segment("protected_session_acquire_ms", protected_session_acquire_ms)
+            envelope_known_ms = (
+                get_recorded_segment("protected_token_verify_ms")
+                + get_recorded_segment("protected_claims_prepare_ms")
+                + get_recorded_segment("protected_policy_ms")
+                + existing_session_ms
+                + protected_session_acquire_ms
+            )
+            record_segment("protected_envelope_total_ms", max(0.0, float(envelope_known_ms)))
 
         yield db
     finally:

@@ -16,6 +16,8 @@ htmlcov/
 
 # Runtime artifacts and logs
 services/api/artifacts/*.json
+services/api/docs/perf/.orders_db_backed_baseline_state.json
+services/api/docs/perf/*-orders-db-baseline/
 *.log
 *.tmp
 *.temp

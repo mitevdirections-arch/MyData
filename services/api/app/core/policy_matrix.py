@@ -3,12 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
+import os
 import time
 from typing import Any
 
 from fastapi import HTTPException, Request
 
 from app.core.auth import ensure_tenant_scope_claims, is_superadmin_step_up_code_valid
+from app.core.perf_sql_trace import sql_trace_zone
 from app.core.permissions import effective_permissions_from_claims, is_permission_allowed, normalize_permission
 from app.core.security_telemetry import emit_security_event
 from app.core.settings import get_settings
@@ -364,6 +366,78 @@ def _claims_from_request(request: Request) -> dict[str, Any] | None:
     return None
 
 
+def _request_authz_cache_enabled() -> bool:
+    raw = str(os.getenv("MYDATA_PERF_REQUEST_AUTHZ_CACHE", "1")).strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _request_authz_cache(request: Request) -> dict[str, Any]:
+    cache = getattr(request.state, "_mydata_request_authz_cache", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        setattr(request.state, "_mydata_request_authz_cache", cache)
+    return cache
+
+
+def _tenant_db_authz_wrapper_breakdown_enabled() -> bool:
+    access_raw = str(os.getenv("MYDATA_PERF_ACCESS_BREAKDOWN", "0")).strip().lower()
+    if access_raw in {"1", "true", "yes", "on"}:
+        return True
+    raw = str(os.getenv("MYDATA_PERF_AUTHZ_WRAPPER_BREAKDOWN", "0")).strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _protected_envelope_breakdown_enabled() -> bool:
+    raw = str(os.getenv("MYDATA_PERF_PROTECTED_ENVELOPE_BREAKDOWN", "0")).strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _env_bool_override(name: str) -> bool | None:
+    raw = os.getenv(str(name))
+    if raw is None:
+        return None
+    val = str(raw).strip().lower()
+    if val in {"1", "true", "yes", "on"}:
+        return True
+    if val in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def _tenant_db_fast_path_enabled(*, settings: Any) -> bool:
+    override = _env_bool_override("MYDATA_AUTHZ_FAST_PATH_ENABLED")
+    if override is not None:
+        return bool(override)
+    return bool(getattr(settings, "authz_tenant_db_fast_path_enabled", False))
+
+
+def _tenant_db_fast_path_shadow_compare_enabled(*, settings: Any) -> bool:
+    override = _env_bool_override("MYDATA_AUTHZ_FAST_PATH_SHADOW")
+    if override is not None:
+        return bool(override)
+    return bool(getattr(settings, "authz_tenant_db_fast_path_shadow_compare_enabled", False))
+
+
+def _record_tenant_db_fast_path_counters(
+    *,
+    shadow_compares: int,
+    shadow_mismatches: int,
+    fast_hits: int,
+    fallbacks: int,
+) -> None:
+    record_segment("authz_fast_path_shadow_compares", float(max(0, int(shadow_compares))))
+    record_segment("authz_fast_path_shadow_mismatches", float(max(0, int(shadow_mismatches))))
+    record_segment("authz_fast_path_hits", float(max(0, int(fast_hits))))
+    record_segment("authz_fast_path_fallbacks", float(max(0, int(fallbacks))))
+
+
+def _claims_signature(claims: dict[str, Any]) -> tuple[str, str, str]:
+    sub = str((claims or {}).get("sub") or "").strip()
+    tenant_id = str((claims or {}).get("tenant_id") or "").strip()
+    roles = sorted(str(x).strip().upper() for x in list((claims or {}).get("roles") or []) if str(x).strip())
+    return sub, tenant_id, "|".join(roles)
+
+
 def _request_ip(request: Request) -> str | None:
     if request.client and request.client.host:
         return str(request.client.host)
@@ -474,8 +548,27 @@ def _tenant_db_effective_permissions_from_fast_path(
     return list(truth.get("effective_permissions") or []), True
 
 
-def _tenant_db_effective_permissions(*, claims: dict[str, Any]) -> list[str]:
-    tenant_id = ensure_tenant_scope_claims(claims)
+def _tenant_db_effective_permissions(*, claims: dict[str, Any], request: Request | None = None) -> list[str]:
+    wrapper_started = time.perf_counter()
+    breakdown_enabled = _tenant_db_authz_wrapper_breakdown_enabled()
+    session_ms = 0.0
+    fastpath_call_ms = 0.0
+
+    shadow_compares = 0
+    shadow_mismatches = 0
+    fast_hits = 0
+    fallbacks = 0
+
+    cache_enabled = bool(request is not None and _request_authz_cache_enabled())
+    cache: dict[str, Any] | None = _request_authz_cache(request) if cache_enabled and request is not None else None
+    try:
+        tenant_id = ensure_tenant_scope_claims(claims, request=request)
+    except TypeError as exc:
+        # Backward-compatible for monkeypatched tests using legacy callable signature.
+        if "unexpected keyword argument 'request'" in str(exc):
+            tenant_id = ensure_tenant_scope_claims(claims)
+        else:
+            raise
 
     roles = {normalize_permission(x) for x in list((claims or {}).get("roles") or []) if normalize_permission(x)}
     if "SUPERADMIN" in roles:
@@ -486,65 +579,148 @@ def _tenant_db_effective_permissions(*, claims: dict[str, Any]) -> list[str]:
         return []
 
     settings = get_settings()
-    fast_path_enabled = bool(settings.authz_tenant_db_fast_path_enabled)
-    shadow_compare_enabled = bool(settings.authz_tenant_db_fast_path_shadow_compare_enabled)
+    fast_path_enabled = _tenant_db_fast_path_enabled(settings=settings)
+    shadow_compare_enabled = _tenant_db_fast_path_shadow_compare_enabled(settings=settings)
     required_source_version = max(1, int(settings.authz_tenant_db_fast_path_source_version))
+    claims_sig = cache.get("tenant_scope_claims_signature") if isinstance(cache, dict) else None
+    if not isinstance(claims_sig, tuple):
+        claims_sig = _claims_signature(claims)
+    cache_key = (
+        claims_sig,
+        bool(fast_path_enabled),
+        bool(shadow_compare_enabled),
+        int(required_source_version),
+    )
+    if isinstance(cache, dict):
+        cached_key = cache.get("tenant_db_authz_key")
+        cached_permissions = cache.get("tenant_db_authz_permissions")
+        if cached_key == cache_key and isinstance(cached_permissions, list):
+            return list(cached_permissions)
 
-    db = get_session_factory()()
+    db = None
+    db_factory = get_session_factory()
+
+    def _get_or_open_db():
+        nonlocal db, session_ms
+        if db is None:
+            sess_started = time.perf_counter()
+            db = db_factory()
+            session_ms += (time.perf_counter() - sess_started) * 1000.0
+        return db
+
     try:
         if fast_path_enabled:
-            fast_permissions, fast_ok = _tenant_db_effective_permissions_from_fast_path(
-                db=db,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                required_source_version=required_source_version,
-            )
+            fast_permissions: list[str] | None = None
+            fast_ok = False
+            try:
+                fast_started = time.perf_counter()
+                fast_permissions, fast_ok = _tenant_db_effective_permissions_from_fast_path(
+                    db=_get_or_open_db(),
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    required_source_version=required_source_version,
+                )
+                fastpath_call_ms += (time.perf_counter() - fast_started) * 1000.0
+            except Exception:  # noqa: BLE001
+                fast_permissions, fast_ok = None, False
             if not fast_ok:
-                return []
-
-            if shadow_compare_enabled:
+                fallbacks += 1
                 canonical_permissions = _tenant_db_effective_permissions_from_canonical(
-                    db=db,
+                    db=_get_or_open_db(),
                     tenant_id=tenant_id,
                     user_id=user_id,
                 )
-                if set(canonical_permissions) != set(list(fast_permissions or [])):
-                    return []
+                out = list(canonical_permissions)
+            else:
+                fast_hits += 1
+                out = list(fast_permissions or [])
 
-            return list(fast_permissions or [])
+            if shadow_compare_enabled:
+                shadow_compares += 1
+                canonical_permissions = _tenant_db_effective_permissions_from_canonical(
+                    db=_get_or_open_db(),
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                )
+                if set(canonical_permissions) != set(list(out)):
+                    shadow_mismatches += 1
+                    if fast_ok:
+                        fallbacks += 1
+                        out = list(canonical_permissions)
+
+            if isinstance(cache, dict):
+                cache["tenant_db_authz_key"] = cache_key
+                cache["tenant_db_authz_permissions"] = list(out)
+            return out
 
         canonical_permissions = _tenant_db_effective_permissions_from_canonical(
-            db=db,
+            db=_get_or_open_db(),
             tenant_id=tenant_id,
             user_id=user_id,
         )
 
         if shadow_compare_enabled:
-            fast_permissions, fast_ok = _tenant_db_effective_permissions_from_fast_path(
-                db=db,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                required_source_version=required_source_version,
-            )
+            shadow_compares += 1
+            try:
+                fast_started = time.perf_counter()
+                fast_permissions, fast_ok = _tenant_db_effective_permissions_from_fast_path(
+                    db=_get_or_open_db(),
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    required_source_version=required_source_version,
+                )
+                fastpath_call_ms += (time.perf_counter() - fast_started) * 1000.0
+            except Exception:  # noqa: BLE001
+                fast_permissions, fast_ok = None, False
             if fast_ok and set(canonical_permissions) != set(list(fast_permissions or [])):
-                return []
+                shadow_mismatches += 1
 
-        return canonical_permissions
+        out = list(canonical_permissions)
+        if isinstance(cache, dict):
+            cache["tenant_db_authz_key"] = cache_key
+            cache["tenant_db_authz_permissions"] = list(out)
+        return out
     except Exception:  # noqa: BLE001
         # Fail-closed on any authz data-plane error.
         return []
     finally:
-        db.close()
+        _record_tenant_db_fast_path_counters(
+            shadow_compares=shadow_compares,
+            shadow_mismatches=shadow_mismatches,
+            fast_hits=fast_hits,
+            fallbacks=fallbacks,
+        )
+        if db is not None:
+            close_started = time.perf_counter()
+            db.close()
+            session_ms += (time.perf_counter() - close_started) * 1000.0
+        if breakdown_enabled:
+            wrapper_ms = (time.perf_counter() - wrapper_started) * 1000.0
+            record_segment("tenant_db_authz_wrapper_ms", max(0.0, float(wrapper_ms)))
+            record_segment("tenant_db_authz_session_ms", max(0.0, float(session_ms)))
+            record_segment("tenant_db_authz_fastpath_call_ms", max(0.0, float(fastpath_call_ms)))
 
 
-def _effective_permissions_for_rule(*, claims: dict[str, Any], rule: RoutePolicy) -> list[str]:
+def _effective_permissions_for_rule(
+    *,
+    claims: dict[str, Any],
+    rule: RoutePolicy,
+    request: Request | None = None,
+) -> list[str]:
     mode = resolve_rule_authz_mode(rule)
     if mode == AUTHZ_MODE_TOKEN_CLAIMS:
         return effective_permissions_from_claims(claims)
     if mode in {AUTHZ_MODE_DB_TRUTH, AUTHZ_MODE_FAST_PATH}:
         tenant_authz_started = time.perf_counter()
         try:
-            return _tenant_db_effective_permissions(claims=claims)
+            with sql_trace_zone("tenant_db_authz"):
+                try:
+                    return _tenant_db_effective_permissions(claims=claims, request=request)
+                except TypeError as exc:
+                    # Backward-compatible for monkeypatched tests using legacy callable signature.
+                    if "unexpected keyword argument 'request'" in str(exc):
+                        return _tenant_db_effective_permissions(claims=claims)
+                    raise
         finally:
             record_segment("tenant_db_authz_ms", (time.perf_counter() - tenant_authz_started) * 1000.0)
     raise HTTPException(status_code=403, detail="policy_authz_source_invalid")
@@ -586,7 +762,7 @@ def enforce_request_policy(request: Request) -> None:
             authz_mode = resolve_rule_authz_mode(rule)
             authz_started = time.perf_counter()
             try:
-                effective = _effective_permissions_for_rule(claims=claims, rule=rule)
+                effective = _effective_permissions_for_rule(claims=claims, rule=rule, request=request)
             except HTTPException as exc:
                 _emit_policy_security_event(
                     request=request,
@@ -622,7 +798,10 @@ def enforce_request_policy(request: Request) -> None:
 
             _enforce_step_up_if_required(request=request, claims=claims, required=bool(rule.step_up))
     finally:
-        record_segment("policy_resolve_ms", (time.perf_counter() - policy_started) * 1000.0)
+        policy_ms = (time.perf_counter() - policy_started) * 1000.0
+        record_segment("policy_resolve_ms", policy_ms)
+        if _protected_envelope_breakdown_enabled():
+            record_segment("protected_policy_ms", policy_ms)
 
 def policy_coverage_snapshot() -> dict[str, Any]:
     return {

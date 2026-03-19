@@ -181,6 +181,16 @@ def record_segment(name: str, value_ms: float) -> None:
     sample.segments_ms[key] = float(sample.segments_ms.get(key, 0.0)) + v
 
 
+def get_recorded_segment(name: str) -> float:
+    sample = _REQUEST_SAMPLE.get()
+    if sample is None:
+        return 0.0
+    key = str(name or "").strip()
+    if not key:
+        return 0.0
+    return max(0.0, float(sample.segments_ms.get(key, 0.0)))
+
+
 def is_request_profile_active() -> bool:
     return _REQUEST_SAMPLE.get() is not None
 

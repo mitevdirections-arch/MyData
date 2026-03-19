@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
+import hashlib
+import os
 import time
 import uuid
 from threading import Lock
@@ -25,6 +27,53 @@ try:
     import redis as redis_lib
 except Exception:  # noqa: BLE001
     redis_lib = None
+
+_AUTH_CONTEXT_CLAIMS_ATTR = "claims"
+_AUTH_CONTEXT_TOKEN_FP_ATTR = "_mydata_verified_bearer_token_fingerprint"
+
+
+def _single_verify_enabled() -> bool:
+    raw = str(os.getenv("MYDATA_PERF_SINGLE_VERIFY", "1")).strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _protected_envelope_breakdown_enabled() -> bool:
+    raw = str(os.getenv("MYDATA_PERF_PROTECTED_ENVELOPE_BREAKDOWN", "0")).strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _extract_bearer_token(auth_header: str | None) -> str | None:
+    raw = str(auth_header or "").strip()
+    if not raw or not raw.lower().startswith("bearer "):
+        return None
+    token = raw.split(" ", 1)[1].strip()
+    return token or None
+
+
+def _token_fingerprint(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _get_verified_claims_from_state(request: Request, token: str) -> dict[str, Any] | None:
+    claims = getattr(request.state, _AUTH_CONTEXT_CLAIMS_ATTR, None)
+    token_fp = getattr(request.state, _AUTH_CONTEXT_TOKEN_FP_ATTR, None)
+    if not isinstance(claims, dict):
+        return None
+    if not isinstance(token_fp, str):
+        return None
+    if token_fp != _token_fingerprint(token):
+        return None
+    return claims
+
+
+def _store_verified_claims_in_state(request: Request, token: str, claims: dict[str, Any]) -> None:
+    setattr(request.state, _AUTH_CONTEXT_CLAIMS_ATTR, claims)
+    setattr(request.state, _AUTH_CONTEXT_TOKEN_FP_ATTR, _token_fingerprint(token))
+
+
+def _clear_verified_claims_state(request: Request) -> None:
+    setattr(request.state, _AUTH_CONTEXT_CLAIMS_ATTR, None)
+    setattr(request.state, _AUTH_CONTEXT_TOKEN_FP_ATTR, None)
 
 
 
@@ -306,21 +355,33 @@ class QueryGuardMiddleware(BaseHTTPMiddleware):
 class AuthContextMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):  # type: ignore[override]
         claims = None
-        auth = request.headers.get("Authorization")
-        if auth and auth.lower().startswith("bearer "):
-            token = auth.split(" ", 1)[1].strip()
-            try:
-                claims = verify_access_token(token)
-            except Exception:  # noqa: BLE001
-                claims = None
+        token = _extract_bearer_token(request.headers.get("Authorization"))
+        if token:
+            if _single_verify_enabled():
+                cached_claims = _get_verified_claims_from_state(request, token)
+                if cached_claims is not None:
+                    claims = cached_claims
+                else:
+                    try:
+                        claims = verify_access_token(token)
+                    except Exception:  # noqa: BLE001
+                        claims = None
+                    else:
+                        _store_verified_claims_in_state(request, token, claims)
+            else:
+                try:
+                    claims = verify_access_token(token)
+                except Exception:  # noqa: BLE001
+                    claims = None
+        if claims is None:
+            _clear_verified_claims_state(request)
 
         ctx_token = set_current_claims(claims)
-        request.state.claims = claims
+        setattr(request.state, _AUTH_CONTEXT_CLAIMS_ATTR, claims)
         try:
             return await call_next(request)
         finally:
             reset_current_claims(ctx_token)
-
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):  # type: ignore[override]
@@ -493,6 +554,8 @@ class CoreEntitlementMiddleware(BaseHTTPMiddleware):
         self.cache_max_entries = max(100, int(settings.core_entitlement_cache_max_entries))
         # tenant_id -> (expires_monotonic, has_core)
         self._core_cache: dict[str, tuple[float, bool]] = {}
+        # Per-tenant single-flight lock to avoid cache-miss stampede under concurrency.
+        self._core_cache_locks: dict[str, asyncio.Lock] = {}
 
     def _is_protected(self, path: str) -> bool:
         if any(path.startswith(x) for x in self.excluded_prefixes):
@@ -516,6 +579,20 @@ class CoreEntitlementMiddleware(BaseHTTPMiddleware):
         while len(self._core_cache) > self.cache_max_entries:
             oldest_key = next(iter(self._core_cache))
             self._core_cache.pop(oldest_key, None)
+
+    def _tenant_cache_lock(self, tenant_id: str) -> asyncio.Lock:
+        lock = self._core_cache_locks.get(tenant_id)
+        if lock is not None:
+            return lock
+
+        lock = asyncio.Lock()
+        self._core_cache_locks[tenant_id] = lock
+        while len(self._core_cache_locks) > self.cache_max_entries:
+            oldest_key = next(iter(self._core_cache_locks))
+            if oldest_key == tenant_id:
+                break
+            self._core_cache_locks.pop(oldest_key, None)
+        return lock
 
     def _required_permission_for_request(self, *, method: str, path: str, claims: dict[str, Any]) -> str | None:
         # Fast early-deny: avoid DB entitlement lookup when policy permission is already missing.
@@ -545,6 +622,13 @@ class CoreEntitlementMiddleware(BaseHTTPMiddleware):
         )
 
         middleware_started = time.perf_counter()
+        breakdown_enabled = _protected_envelope_breakdown_enabled()
+        protected_envelope_started = middleware_started
+        protected_token_verify_ms = 0.0
+        protected_claims_prepare_ms = 0.0
+        protected_policy_ms = 0.0
+        protected_session_acquire_ms = 0.0
+        core_protected_flow = False
         status_code = 500
         response = None
         try:
@@ -553,21 +637,41 @@ class CoreEntitlementMiddleware(BaseHTTPMiddleware):
                 response = await call_next(request)
                 status_code = int(getattr(response, "status_code", 500))
                 return response
-
-            auth = request.headers.get("Authorization")
-            if not auth or not auth.lower().startswith("bearer "):
+            core_protected_flow = True
+            token = _extract_bearer_token(request.headers.get("Authorization"))
+            if not token:
                 response = JSONResponse(status_code=401, content={"ok": False, "detail": "missing_authorization"})
                 status_code = 401
                 return response
 
-            token = auth.split(" ", 1)[1].strip()
-            try:
-                claims = verify_access_token(token)
-            except Exception as exc:  # noqa: BLE001
-                response = JSONResponse(status_code=401, content={"ok": False, "detail": str(exc)})
-                status_code = 401
-                return response
-
+            claims_prepare_started = time.perf_counter()
+            if _single_verify_enabled():
+                cached_claims = _get_verified_claims_from_state(request, token)
+                if cached_claims is not None:
+                    claims = cached_claims
+                else:
+                    token_verify_started = time.perf_counter()
+                    try:
+                        claims = verify_access_token(token)
+                    except Exception as exc:  # noqa: BLE001
+                        protected_token_verify_ms += (time.perf_counter() - token_verify_started) * 1000.0
+                        response = JSONResponse(status_code=401, content={"ok": False, "detail": str(exc)})
+                        status_code = 401
+                        return response
+                    protected_token_verify_ms += (time.perf_counter() - token_verify_started) * 1000.0
+                    _store_verified_claims_in_state(request, token, claims)
+            else:
+                token_verify_started = time.perf_counter()
+                try:
+                    claims = verify_access_token(token)
+                except Exception as exc:  # noqa: BLE001
+                    protected_token_verify_ms += (time.perf_counter() - token_verify_started) * 1000.0
+                    response = JSONResponse(status_code=401, content={"ok": False, "detail": str(exc)})
+                    status_code = 401
+                    return response
+                protected_token_verify_ms += (time.perf_counter() - token_verify_started) * 1000.0
+            claims_prepare_elapsed_ms = (time.perf_counter() - claims_prepare_started) * 1000.0
+            protected_claims_prepare_ms += max(0.0, claims_prepare_elapsed_ms - protected_token_verify_ms)
             roles = set(claims.get("roles") or [])
             if "SUPERADMIN" in roles:
                 response = await call_next(request)
@@ -581,7 +685,9 @@ class CoreEntitlementMiddleware(BaseHTTPMiddleware):
                 return response
 
             method = str(request.method or "GET").upper()
+            policy_started = time.perf_counter()
             required = self._required_permission_for_request(method=method, path=path, claims=claims)
+            protected_policy_ms += (time.perf_counter() - policy_started) * 1000.0
             if required:
                 response = JSONResponse(status_code=403, content={"ok": False, "detail": f"permission_required:{required}"})
                 status_code = 403
@@ -591,24 +697,29 @@ class CoreEntitlementMiddleware(BaseHTTPMiddleware):
             has_core = self._cache_get(tenant_id, now_mono)
 
             if has_core is None:
-                now = datetime.now(timezone.utc)
-                db = get_session_factory()()
-                try:
-                    core = (
-                        db.query(License)
-                        .filter(
-                            License.tenant_id == tenant_id,
-                            License.license_type == "CORE",
-                            License.status == "ACTIVE",
-                            License.valid_from <= now,
-                            License.valid_to >= now,
-                        )
-                        .first()
-                    )
-                    has_core = core is not None
-                finally:
-                    db.close()
-                self._cache_set(tenant_id, has_core, now_mono)
+                async with self._tenant_cache_lock(tenant_id):
+                    has_core = self._cache_get(tenant_id, time.monotonic())
+                    if has_core is None:
+                        now = datetime.now(timezone.utc)
+                        session_started = time.perf_counter()
+                        db = get_session_factory()()
+                        protected_session_acquire_ms += (time.perf_counter() - session_started) * 1000.0
+                        try:
+                            core = (
+                                db.query(License)
+                                .filter(
+                                    License.tenant_id == tenant_id,
+                                    License.license_type == "CORE",
+                                    License.status == "ACTIVE",
+                                    License.valid_from <= now,
+                                    License.valid_to >= now,
+                                )
+                                .first()
+                            )
+                            has_core = core is not None
+                        finally:
+                            db.close()
+                        self._cache_set(tenant_id, has_core, time.monotonic())
 
             if not has_core:
                 response = JSONResponse(status_code=402, content={"ok": False, "detail": "core_license_required"})
@@ -620,8 +731,21 @@ class CoreEntitlementMiddleware(BaseHTTPMiddleware):
             return response
         finally:
             total_ms = (time.perf_counter() - middleware_started) * 1000.0
+            if breakdown_enabled and core_protected_flow:
+                known_ms = (
+                    max(0.0, float(protected_token_verify_ms))
+                    + max(0.0, float(protected_claims_prepare_ms))
+                    + max(0.0, float(protected_policy_ms))
+                    + max(0.0, float(protected_session_acquire_ms))
+                )
+                record_segment("protected_token_verify_ms", max(0.0, float(protected_token_verify_ms)))
+                record_segment("protected_claims_prepare_ms", max(0.0, float(protected_claims_prepare_ms)))
+                record_segment("protected_policy_ms", max(0.0, float(protected_policy_ms)))
+                record_segment("protected_session_acquire_ms", max(0.0, float(protected_session_acquire_ms)))
+                record_segment("protected_envelope_total_ms", max(0.0, float(known_ms)))
             record_segment("middleware_total_ms", total_ms)
             record_segment("total_request_ms", total_ms)
             end_request_profile(status_code=status_code, token=profile_token)
+
 
 
