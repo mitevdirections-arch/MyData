@@ -18,6 +18,12 @@ PERMISSION_REGISTRY: list[dict[str, Any]] = [
     {"permission_code": "MARKETPLACE.WRITE", "workspace_type": "TENANT", "module_code": "MARKETPLACE", "description": "Create purchase requests", "risk_level": "MEDIUM", "sensitive": False, "active": True},
     {"permission_code": "ORDERS.READ", "workspace_type": "TENANT", "module_code": "ORDERS", "description": "Read tenant orders", "risk_level": "LOW", "sensitive": False, "active": True},
     {"permission_code": "ORDERS.WRITE", "workspace_type": "TENANT", "module_code": "ORDERS", "description": "Create/update tenant orders", "risk_level": "MEDIUM", "sensitive": True, "active": True},
+    {"permission_code": "PARTNERS.READ", "workspace_type": "TENANT", "module_code": "PARTNERS", "description": "Read tenant partners registry", "risk_level": "LOW", "sensitive": False, "active": True},
+    {"permission_code": "PARTNERS.WRITE", "workspace_type": "TENANT", "module_code": "PARTNERS", "description": "Create/update tenant partners", "risk_level": "MEDIUM", "sensitive": True, "active": True},
+    {"permission_code": "PARTNERS.ARCHIVE", "workspace_type": "TENANT", "module_code": "PARTNERS", "description": "Archive tenant partners", "risk_level": "HIGH", "sensitive": True, "active": True},
+    {"permission_code": "PARTNERS.RATE", "workspace_type": "TENANT", "module_code": "PARTNERS", "description": "Rate tenant partners", "risk_level": "MEDIUM", "sensitive": False, "active": True},
+    {"permission_code": "PARTNERS.VIEW_GLOBAL_SIGNAL", "workspace_type": "TENANT", "module_code": "PARTNERS", "description": "View global partner aggregate signals", "risk_level": "MEDIUM", "sensitive": True, "active": True},
+    {"permission_code": "PARTNERS.MANAGE_BLACKLIST", "workspace_type": "TENANT", "module_code": "PARTNERS", "description": "Manage tenant partner blacklist/watchlist", "risk_level": "HIGH", "sensitive": True, "active": True},
     {"permission_code": "LICENSES.READ", "workspace_type": "BOTH", "module_code": "LICENSING", "description": "Read licenses and entitlements", "risk_level": "LOW", "sensitive": False, "active": True},
     {"permission_code": "LICENSES.WRITE", "workspace_type": "BOTH", "module_code": "LICENSING", "description": "Issue/modify licenses", "risk_level": "CRITICAL", "sensitive": True, "active": True},
     {"permission_code": "TENANTS.READ", "workspace_type": "PLATFORM", "module_code": "TENANTS", "description": "Read tenants metadata", "risk_level": "MEDIUM", "sensitive": True, "active": True},
@@ -40,7 +46,7 @@ ROLE_TEMPLATES: dict[str, list[dict[str, Any]]] = {
     "TENANT": [
         {"template_code": "TENANT_ADMIN", "role_name": "Tenant Administrator", "description": "Full tenant control", "permissions": ["*"]},
         {"template_code": "ACCOUNTANT", "role_name": "Accountant", "description": "Finance and invoicing", "permissions": ["LICENSES.READ", "PAYMENTS.READ", "PROFILE.READ", "PROFILE.WRITE"]},
-        {"template_code": "DISPATCHER", "role_name": "Dispatcher", "description": "Orders and operations", "permissions": ["MARKETPLACE.READ", "MARKETPLACE.WRITE", "ORDERS.READ", "ORDERS.WRITE", "INCIDENTS.READ"]},
+        {"template_code": "DISPATCHER", "role_name": "Dispatcher", "description": "Orders and operations", "permissions": ["MARKETPLACE.READ", "MARKETPLACE.WRITE", "ORDERS.READ", "ORDERS.WRITE", "PARTNERS.READ", "PARTNERS.WRITE", "PARTNERS.RATE", "INCIDENTS.READ"]},
         {"template_code": "IT_ADMIN", "role_name": "IT Administrator", "description": "Tenant security and IAM", "permissions": ["IAM.READ", "IAM.WRITE", "SECURITY.READ", "SECURITY.WRITE"]},
     ],
     "PLATFORM": [

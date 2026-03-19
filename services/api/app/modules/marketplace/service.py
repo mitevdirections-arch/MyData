@@ -80,6 +80,7 @@ class MarketplaceService:
         now = self._now()
         seed = [
             ("MODULE_ORDERS", "Orders", "OPERATIONS", 4900),
+            ("MODULE_PARTNERS", "Partners", "OPERATIONS", 3900),
             ("MODULE_FLEET", "Fleet", "OPERATIONS", 5900),
             ("MODULE_WAREHOUSE", "Warehouse", "LOGISTICS", 6900),
             ("MODULE_INVOICING", "Invoicing", "FINANCE", 3900),

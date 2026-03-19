@@ -49,3 +49,9 @@ def test_marketplace_routes_are_foundation_controlled_facade() -> None:
     for method, path in sorted(ROUTE_POLICY.keys()):
         if path == "/marketplace" or path.startswith("/marketplace/"):
             assert resolve_route_plane(method, path) == ROUTE_PLANE_FOUNDATION
+
+
+def test_partners_routes_are_operational() -> None:
+    for method, path in sorted(ROUTE_POLICY.keys()):
+        if path == "/partners" or path.startswith("/partners/"):
+            assert resolve_route_plane(method, path) == ROUTE_PLANE_OPERATIONAL

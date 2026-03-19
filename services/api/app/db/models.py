@@ -29,6 +29,18 @@ from app.db.model_parts.ai import (
     EidonTemplateSubmissionStaging,
 )
 from app.db.model_parts.marketplace import MarketplaceModule, MarketplaceOffer
+from app.db.model_parts.partners import (
+    GlobalCompany,
+    GlobalCompanyReputation,
+    PartnerOrderRating,
+    TenantPartner,
+    TenantPartnerAddress,
+    TenantPartnerBankAccount,
+    TenantPartnerContact,
+    TenantPartnerDocument,
+    TenantPartnerRatingSummary,
+    TenantPartnerRole,
+)
 from app.db.model_parts.payments import PaymentInvoice, PaymentInvoiceSequence, TenantCreditAccount
 from app.db.model_parts.support_onboarding_public import (
     I18nWorkspacePolicy,

@@ -69,6 +69,26 @@ def test_orders_policy_uses_tenant_db_authz_contract() -> None:
         assert str(rule.authz_mode or "").upper() == AUTHZ_MODE_DB_TRUTH
 
 
+def test_partners_policy_has_explicit_permission_contract() -> None:
+    keys = [
+        ("GET", "/partners"),
+        ("POST", "/partners"),
+        ("GET", "/partners/{partner_id}"),
+        ("PUT", "/partners/{partner_id}"),
+        ("POST", "/partners/{partner_id}/archive"),
+        ("PUT", "/partners/{partner_id}/roles"),
+        ("POST", "/partners/{partner_id}/ratings"),
+        ("GET", "/partners/{partner_id}/rating-summary"),
+        ("GET", "/partners/{partner_id}/global-signal"),
+        ("POST", "/partners/{partner_id}/blacklist"),
+        ("POST", "/partners/{partner_id}/watchlist"),
+    ]
+    for key in keys:
+        rule = ROUTE_POLICY.get(key)
+        assert rule is not None
+        assert str(rule.authz_mode or "").upper() == AUTHZ_MODE_TOKEN_CLAIMS
+
+
 def test_policy_permission_denied_without_required_permission() -> None:
     client = TestClient(app)
     tok = _token(sub="user@tenant.local", roles=["USER"], tenant_id="tenant-dev-001")
