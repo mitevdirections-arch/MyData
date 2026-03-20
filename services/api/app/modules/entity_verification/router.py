@@ -99,7 +99,7 @@ def get_summary(
 def list_checks(
     target_id: str,
     include_evidence: bool = Query(default=False),
-    limit: int = Query(default=100, ge=1, le=500),
+    limit: int = Query(default=20, ge=1, le=20),
     claims: dict[str, Any] = Depends(require_claim_permission("entity_verification.read")),
     db: Session = Depends(get_db_session),
 ) -> VerificationChecksResponseDTO:
@@ -156,4 +156,5 @@ def check_vies_for_target(
         raise HTTPException(status_code=_err_status(str(exc)), detail=str(exc)) from exc
     db.commit()
     return VerificationProviderCheckResponseDTO(ok=True, result=result)
+
 

@@ -152,6 +152,42 @@ def test_inflight_acquire_dedup_path(db) -> None:
     assert dedup_cooldown.cooldown_active is True
 
 
+def test_inflight_manual_check_window_limit(db) -> None:
+    service = EntityVerificationService()
+    target = service.upsert_verification_target(
+        db,
+        payload=_target_payload(f"partner-{uuid.uuid4().hex[:10]}"),
+    )
+    now = datetime.now(timezone.utc)
+    for idx in range(20):
+        service.record_verification_check(
+            db,
+            target_id=target.id,
+            provider_result=ProviderCheckResultDTO(
+                provider_code="VIES",
+                check_type="VAT",
+                status=ProviderStatus.NOT_VERIFIED,
+                checked_at=now - timedelta(seconds=idx),
+                evidence_json={"provider_raw_status": "INVALID"},
+            ),
+            created_by_user_id="tester@local",
+        )
+
+    blocked = service.acquire_inflight_check(
+        db,
+        target_id=target.id,
+        provider_code="vies",
+        started_by_user_id="tester@local",
+        request_id="req-window-limit",
+        manual_check_window_seconds=300,
+        manual_check_window_max=20,
+    )
+    assert blocked.acquired is False
+    assert blocked.dedup_hit is True
+    assert blocked.cooldown_active is True
+    assert blocked.reason == "manual_check_window_limit"
+
+
 def test_record_check_evidence_guardrails(db) -> None:
     service = EntityVerificationService()
     target = service.upsert_verification_target(
@@ -308,4 +344,3 @@ def test_non_blocking_unavailable_process_flow(db) -> None:
 
     checks_count = db.query(EntityVerificationCheck).filter(EntityVerificationCheck.target_id == uuid.UUID(target.id)).count()
     assert checks_count >= 1
-

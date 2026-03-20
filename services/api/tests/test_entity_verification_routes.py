@@ -114,6 +114,10 @@ def test_entity_verification_openapi_paths_exist() -> None:
     assert "get" in paths["/admin/entity-verification/targets/{target_id}/checks"]
     assert "post" in paths["/admin/entity-verification/targets/{target_id}/recheck"]
     assert "post" in paths["/admin/entity-verification/targets/{target_id}/providers/vies/check"]
+    checks_get = paths["/admin/entity-verification/targets/{target_id}/checks"]["get"]
+    limit_param = next(x for x in checks_get.get("parameters", []) if x.get("name") == "limit")
+    assert int((limit_param.get("schema") or {}).get("maximum")) == 20
+    assert int((limit_param.get("schema") or {}).get("default")) == 20
 
 
 def test_entity_verification_admin_routes_contract(monkeypatch) -> None:
@@ -220,4 +224,3 @@ def test_entity_verification_get_routes_do_not_trigger_provider_call(monkeypatch
         assert called.value is False
     finally:
         app.dependency_overrides.clear()
-

@@ -48,6 +48,8 @@ INFLIGHT_TTL_SECONDS_ENV = "MYDATA_ENTITY_VERIFICATION_INFLIGHT_TTL_SECONDS"
 RECHECK_COOLDOWN_SECONDS_ENV = "MYDATA_ENTITY_VERIFICATION_RECHECK_COOLDOWN_SECONDS"
 IDEMPOTENCY_TTL_SECONDS_ENV = "MYDATA_ENTITY_VERIFICATION_IDEMPOTENCY_TTL_SECONDS"
 PROVIDER_COOLDOWN_SECONDS_ENV = "MYDATA_ENTITY_VERIFICATION_PROVIDER_COOLDOWN_SECONDS"
+MANUAL_CHECK_WINDOW_SECONDS_ENV = "MYDATA_ENTITY_VERIFICATION_MANUAL_CHECK_WINDOW_SECONDS"
+MANUAL_CHECK_WINDOW_MAX_ENV = "MYDATA_ENTITY_VERIFICATION_MANUAL_CHECK_WINDOW_MAX"
 
 DEFAULT_TTL_VERIFIED_HOURS = 168
 DEFAULT_TTL_NOT_VERIFIED_HOURS = 24
@@ -56,6 +58,8 @@ DEFAULT_INFLIGHT_TTL_SECONDS = 120
 DEFAULT_RECHECK_COOLDOWN_SECONDS = 60
 DEFAULT_IDEMPOTENCY_TTL_SECONDS = 120
 DEFAULT_PROVIDER_COOLDOWN_SECONDS = 60
+DEFAULT_MANUAL_CHECK_WINDOW_SECONDS = 300
+DEFAULT_MANUAL_CHECK_WINDOW_MAX = 20
 DEFAULT_CIRCUIT_WINDOW_MINUTES = 10
 DEFAULT_CIRCUIT_FAILURE_THRESHOLD = 5
 MAX_EVIDENCE_PAYLOAD_BYTES = 16 * 1024
@@ -106,6 +110,16 @@ class EntityVerificationService:
         self.recheck_cooldown_seconds = _env_int(RECHECK_COOLDOWN_SECONDS_ENV, DEFAULT_RECHECK_COOLDOWN_SECONDS, min_value=1)
         self.idempotency_ttl_seconds = _env_int(IDEMPOTENCY_TTL_SECONDS_ENV, DEFAULT_IDEMPOTENCY_TTL_SECONDS, min_value=1)
         self.provider_cooldown_seconds = _env_int(PROVIDER_COOLDOWN_SECONDS_ENV, DEFAULT_PROVIDER_COOLDOWN_SECONDS, min_value=1)
+        self.manual_check_window_seconds = _env_int(
+            MANUAL_CHECK_WINDOW_SECONDS_ENV,
+            DEFAULT_MANUAL_CHECK_WINDOW_SECONDS,
+            min_value=1,
+        )
+        self.manual_check_window_max = _env_int(
+            MANUAL_CHECK_WINDOW_MAX_ENV,
+            DEFAULT_MANUAL_CHECK_WINDOW_MAX,
+            min_value=1,
+        )
         self.provider_circuit_window_minutes = DEFAULT_CIRCUIT_WINDOW_MINUTES
         self.provider_circuit_failure_threshold = DEFAULT_CIRCUIT_FAILURE_THRESHOLD
         self.vies_enabled = bool(getattr(settings, "entity_verification_vies_enabled", False))
@@ -272,7 +286,7 @@ class EntityVerificationService:
         limit: int = 100,
     ) -> list[VerificationCheckDTO]:
         tid = self._parse_target_uuid(target_id)
-        lim = max(1, min(500, int(limit)))
+        lim = max(1, min(20, int(limit)))
         rows = (
             db.query(EntityVerificationCheck)
             .filter(EntityVerificationCheck.target_id == tid)
@@ -397,6 +411,8 @@ class EntityVerificationService:
         lease_ttl_seconds: int | None = None,
         recheck_cooldown_seconds: int | None = None,
         idempotency_ttl_seconds: int | None = None,
+        manual_check_window_seconds: int | None = None,
+        manual_check_window_max: int | None = None,
     ) -> InflightAcquireResultDTO:
         tid = self._parse_target_uuid(target_id)
         provider = self._clean(provider_code, 64).upper()
@@ -407,8 +423,45 @@ class EntityVerificationService:
         lease_ttl = max(1, int(lease_ttl_seconds if lease_ttl_seconds is not None else self.inflight_ttl_seconds))
         cooldown_s = max(1, int(recheck_cooldown_seconds if recheck_cooldown_seconds is not None else self.recheck_cooldown_seconds))
         idempotency_s = max(1, int(idempotency_ttl_seconds if idempotency_ttl_seconds is not None else self.idempotency_ttl_seconds))
+        manual_window_s = max(
+            1,
+            int(
+                manual_check_window_seconds
+                if manual_check_window_seconds is not None
+                else self.manual_check_window_seconds
+            ),
+        )
+        manual_window_max_count = max(
+            1,
+            int(
+                manual_check_window_max
+                if manual_check_window_max is not None
+                else self.manual_check_window_max
+            ),
+        )
         request = self._clean_opt(request_id, 128)
         started_by = self._clean_opt(started_by_user_id, 255)
+
+        recent_checks_count = (
+            db.query(EntityVerificationCheck)
+            .filter(
+                EntityVerificationCheck.target_id == tid,
+                EntityVerificationCheck.provider_code == provider,
+                EntityVerificationCheck.checked_at >= (now - timedelta(seconds=manual_window_s)),
+            )
+            .count()
+        )
+        if recent_checks_count >= manual_window_max_count:
+            record_segment("recheck_dedup_hit_count", 1.0)
+            return InflightAcquireResultDTO(
+                acquired=False,
+                dedup_hit=True,
+                cooldown_active=True,
+                reason="manual_check_window_limit",
+                target_id=str(tid),
+                provider_code=provider,
+                lease_expires_at=(now + timedelta(seconds=manual_window_s)).isoformat(),
+            )
 
         row = (
             db.query(EntityVerificationInflight)
