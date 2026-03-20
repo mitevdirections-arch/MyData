@@ -8,6 +8,7 @@ SPLIT_DOMAIN_MODULES: tuple[str, ...] = (
     "shared_patterns",
     "tenants",
     "licensing",
+    "entity_verification",
     "ai",
     "marketplace",
     "partners",

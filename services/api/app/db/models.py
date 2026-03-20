@@ -29,6 +29,13 @@ from app.db.model_parts.ai import (
     EidonTemplateSubmissionStaging,
 )
 from app.db.model_parts.marketplace import MarketplaceModule, MarketplaceOffer
+from app.db.model_parts.entity_verification import (
+    EntityVerificationCheck,
+    EntityVerificationInflight,
+    EntityVerificationProviderState,
+    EntityVerificationSummary,
+    EntityVerificationTarget,
+)
 from app.db.model_parts.partners import (
     GlobalCompany,
     GlobalCompanyReputation,
