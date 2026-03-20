@@ -3,12 +3,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import json
 import os
+import time
 import uuid
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.core.perf_profile import record_segment
+from app.core.settings import get_settings
 from app.db.models import (
     EntityVerificationCheck,
     EntityVerificationInflight,
@@ -17,6 +19,7 @@ from app.db.models import (
     EntityVerificationTarget,
 )
 from app.modules.entity_verification.normalization import (
+    get_vies_applicability_status,
     normalize_address_lite,
     normalize_country_code,
     normalize_legal_name,
@@ -29,11 +32,14 @@ from app.modules.entity_verification.schemas import (
     ProviderCheckResultDTO,
     ProviderStatus,
     SummaryStatus,
+    VerificationProviderRunDTO,
     VerificationCheckDTO,
     VerificationSummaryDTO,
     VerificationTargetDTO,
     VerificationTargetUpsertInput,
+    ViesApplicabilityStatus,
 )
+from app.modules.entity_verification.providers.vies import VIESProviderAdapter
 
 TTL_VERIFIED_HOURS_ENV = "MYDATA_ENTITY_VERIFICATION_TTL_VERIFIED_HOURS"
 TTL_NOT_VERIFIED_HOURS_ENV = "MYDATA_ENTITY_VERIFICATION_TTL_NOT_VERIFIED_HOURS"
@@ -74,6 +80,9 @@ EVIDENCE_ALLOWLIST: set[str] = {
     "match_basis",
     "request_id",
     "provider_payload_version",
+    "applicability_status",
+    "provider_call_skipped",
+    "provider_call_ms",
 }
 
 
@@ -89,6 +98,7 @@ class EntityVerificationService:
     """Phase 1B foundation for target lifecycle, inflight control and summary recompute."""
 
     def __init__(self) -> None:
+        settings = get_settings()
         self.ttl_verified_hours = _env_int(TTL_VERIFIED_HOURS_ENV, DEFAULT_TTL_VERIFIED_HOURS, min_value=1)
         self.ttl_not_verified_hours = _env_int(TTL_NOT_VERIFIED_HOURS_ENV, DEFAULT_TTL_NOT_VERIFIED_HOURS, min_value=1)
         self.ttl_unavailable_minutes = _env_int(TTL_UNAVAILABLE_MINUTES_ENV, DEFAULT_TTL_UNAVAILABLE_MINUTES, min_value=1)
@@ -98,6 +108,13 @@ class EntityVerificationService:
         self.provider_cooldown_seconds = _env_int(PROVIDER_COOLDOWN_SECONDS_ENV, DEFAULT_PROVIDER_COOLDOWN_SECONDS, min_value=1)
         self.provider_circuit_window_minutes = DEFAULT_CIRCUIT_WINDOW_MINUTES
         self.provider_circuit_failure_threshold = DEFAULT_CIRCUIT_FAILURE_THRESHOLD
+        self.vies_enabled = bool(getattr(settings, "entity_verification_vies_enabled", False))
+        self.vies_connect_timeout_seconds = int(getattr(settings, "entity_verification_vies_connect_timeout_seconds", 2))
+        self.vies_read_timeout_seconds = int(getattr(settings, "entity_verification_vies_read_timeout_seconds", 4))
+        self.vies_total_budget_seconds = int(getattr(settings, "entity_verification_vies_total_budget_seconds", 7))
+        self.vies_retry_count = int(getattr(settings, "entity_verification_vies_retry_count", 1))
+        self.vies_retry_backoff_ms = int(getattr(settings, "entity_verification_vies_retry_backoff_ms", 300))
+        self.vies_cooldown_seconds = int(getattr(settings, "entity_verification_vies_cooldown_seconds", 60))
 
     def _now(self) -> datetime:
         return datetime.now(timezone.utc)
@@ -746,6 +763,180 @@ class EntityVerificationService:
                     provider_code=parsed_result.provider_code,
                     request_id=request_id,
                 )
+
+    def _latest_check_for_provider(
+        self,
+        db: Session,
+        *,
+        target_id: uuid.UUID,
+        provider_code: str,
+    ) -> VerificationCheckDTO | None:
+        row = (
+            db.query(EntityVerificationCheck)
+            .filter(
+                EntityVerificationCheck.target_id == target_id,
+                EntityVerificationCheck.provider_code == self._clean(provider_code, 64).upper(),
+            )
+            .order_by(EntityVerificationCheck.checked_at.desc())
+            .first()
+        )
+        if row is None:
+            return None
+        return self._check_to_dto(row)
+
+    def _summary_for_target(self, db: Session, *, target_id: uuid.UUID) -> VerificationSummaryDTO | None:
+        row = db.query(EntityVerificationSummary).filter(EntityVerificationSummary.target_id == target_id).first()
+        if row is None:
+            return None
+        return self._summary_to_dto(row)
+
+    def _build_vies_provider(
+        self,
+        *,
+        execution_client: Any = None,
+    ) -> VIESProviderAdapter:
+        return VIESProviderAdapter(
+            enabled=self.vies_enabled,
+            execution_client=execution_client,
+            connect_timeout_seconds=self.vies_connect_timeout_seconds,
+            read_timeout_seconds=self.vies_read_timeout_seconds,
+            total_budget_seconds=self.vies_total_budget_seconds,
+            retry_count=self.vies_retry_count,
+            retry_backoff_ms=self.vies_retry_backoff_ms,
+        )
+
+    def run_vies_verification_for_target(
+        self,
+        db: Session,
+        *,
+        target_id: str | uuid.UUID,
+        created_by_user_id: str | None = None,
+        request_id: str | None = None,
+        provider: VIESProviderAdapter | None = None,
+        execution_client: Any = None,
+    ) -> VerificationProviderRunDTO:
+        tid = self._parse_target_uuid(target_id)
+        row = db.query(EntityVerificationTarget).filter(EntityVerificationTarget.id == tid).first()
+        if row is None:
+            raise ValueError("target_not_found")
+        target = self._target_to_dto(row)
+
+        applicability_status = get_vies_applicability_status(
+            country_code=target.country_code,
+            vat_number=target.vat_number_normalized or target.vat_number,
+        )
+
+        acquired = self.acquire_inflight_check(
+            db,
+            target_id=tid,
+            provider_code="VIES",
+            started_by_user_id=created_by_user_id,
+            request_id=request_id,
+        )
+        if not acquired.acquired:
+            return VerificationProviderRunDTO(
+                acquired=False,
+                dedup_hit=True,
+                provider_called=False,
+                reason=acquired.reason,
+                applicability_status=applicability_status,
+                check=self._latest_check_for_provider(db, target_id=tid, provider_code="VIES"),
+                summary=self._summary_for_target(db, target_id=tid),
+            )
+
+        provider_adapter = provider or self._build_vies_provider(execution_client=execution_client)
+        provider_called = False
+        provider_call_ms: float | None = None
+
+        if applicability_status == ViesApplicabilityStatus.VIES_NOT_APPLICABLE:
+            provider_result = ProviderCheckResultDTO(
+                provider_code="VIES",
+                check_type="VAT",
+                status=ProviderStatus.NOT_APPLICABLE,
+                checked_at=self._now(),
+                provider_message_code="vies_not_applicable",
+                provider_message_text="Country is outside VIES scope.",
+                evidence_json={
+                    "applicability_status": applicability_status.value,
+                    "provider_call_skipped": True,
+                    "country_code": target.country_code,
+                    "vat_number_normalized": target.vat_number_normalized,
+                    "request_id": request_id,
+                },
+            )
+        elif applicability_status == ViesApplicabilityStatus.INSUFFICIENT_DATA:
+            provider_result = ProviderCheckResultDTO(
+                provider_code="VIES",
+                check_type="VAT",
+                status=ProviderStatus.NOT_APPLICABLE,
+                checked_at=self._now(),
+                provider_message_code="insufficient_data",
+                provider_message_text="Insufficient data for VIES applicability.",
+                evidence_json={
+                    "applicability_status": applicability_status.value,
+                    "provider_call_skipped": True,
+                    "country_code": target.country_code,
+                    "vat_number_normalized": target.vat_number_normalized,
+                    "request_id": request_id,
+                },
+            )
+        elif applicability_status == ViesApplicabilityStatus.VIES_FORMAT_SUSPECT:
+            provider_result = ProviderCheckResultDTO(
+                provider_code="VIES",
+                check_type="VAT",
+                status=ProviderStatus.PARTIAL_MATCH,
+                checked_at=self._now(),
+                provider_message_code="vies_format_suspect",
+                provider_message_text="VAT format is suspicious for VIES; no live call performed.",
+                evidence_json={
+                    "applicability_status": applicability_status.value,
+                    "provider_call_skipped": True,
+                    "country_code": target.country_code,
+                    "vat_number_normalized": target.vat_number_normalized,
+                    "request_id": request_id,
+                },
+            )
+        elif self.is_provider_circuit_open(db, provider_code="VIES"):
+            provider_result = ProviderCheckResultDTO(
+                provider_code="VIES",
+                check_type="VAT",
+                status=ProviderStatus.UNAVAILABLE,
+                checked_at=self._now(),
+                expires_at=self._now() + timedelta(seconds=self.vies_cooldown_seconds),
+                provider_message_code="vies_circuit_open",
+                provider_message_text="VIES provider is temporarily in cooldown mode.",
+                evidence_json={
+                    "applicability_status": applicability_status.value,
+                    "provider_raw_status": "circuit_open",
+                    "country_code": target.country_code,
+                    "vat_number_normalized": target.vat_number_normalized,
+                    "request_id": request_id,
+                },
+            )
+        else:
+            started = time.perf_counter()
+            provider_result = provider_adapter.run_check(target=target, request_id=request_id)
+            provider_call_ms = (time.perf_counter() - started) * 1000.0
+            provider_called = True
+
+        check, summary = self.process_provider_result(
+            db,
+            target_id=tid,
+            provider_result=provider_result,
+            created_by_user_id=created_by_user_id,
+            request_id=request_id,
+            release_inflight=True,
+            provider_call_ms=provider_call_ms if provider_called else None,
+        )
+        return VerificationProviderRunDTO(
+            acquired=True,
+            dedup_hit=False,
+            provider_called=provider_called,
+            reason="provider_result_recorded",
+            applicability_status=applicability_status,
+            check=check,
+            summary=summary,
+        )
 
 
 service = EntityVerificationService()

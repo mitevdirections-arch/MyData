@@ -28,6 +28,13 @@ class SummaryStatus(str, Enum):
     UNKNOWN = "UNKNOWN"
 
 
+class ViesApplicabilityStatus(str, Enum):
+    VIES_ELIGIBLE = "VIES_ELIGIBLE"
+    VIES_NOT_APPLICABLE = "VIES_NOT_APPLICABLE"
+    VIES_FORMAT_SUSPECT = "VIES_FORMAT_SUSPECT"
+    INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
+
+
 class VerificationTargetUpsertInput(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -117,3 +124,13 @@ class InflightAcquireResultDTO(BaseModel):
     target_id: str
     provider_code: str
     lease_expires_at: str | None = None
+
+
+class VerificationProviderRunDTO(BaseModel):
+    acquired: bool
+    dedup_hit: bool
+    provider_called: bool
+    reason: str
+    applicability_status: ViesApplicabilityStatus
+    check: VerificationCheckDTO | None = None
+    summary: VerificationSummaryDTO | None = None

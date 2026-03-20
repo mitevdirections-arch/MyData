@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.modules.entity_verification.schemas import ViesApplicabilityStatus
+
 EU_COUNTRY_CODES = {
     "AT",
     "BE",
@@ -33,6 +35,7 @@ EU_COUNTRY_CODES = {
     "SK",
     "GR",
 }
+VIES_SCOPE_COUNTRY_CODES = set(EU_COUNTRY_CODES) | {"XI"}
 
 _NON_ALNUM_RE = re.compile(r"[^A-Z0-9]+")
 _WS_RE = re.compile(r"\s+")
@@ -68,8 +71,14 @@ def normalize_legal_name_key(value: Any) -> str:
     return _NON_ALNUM_RE.sub("", legal_name)[:255]
 
 
-def normalize_vat_number(value: Any, *, country_code: str | None = None) -> tuple[str | None, str | None]:
-    vat_raw = _clean_opt(value, 64)
+def normalize_vat_number(
+    value: Any = None,
+    *,
+    country_code: str | None = None,
+    vat_number: Any = None,
+) -> tuple[str | None, str | None]:
+    source = value if vat_number is None else vat_number
+    vat_raw = _clean_opt(source, 64)
     if not vat_raw:
         return None, None
 
@@ -80,6 +89,8 @@ def normalize_vat_number(value: Any, *, country_code: str | None = None) -> tupl
     cc = normalize_country_code(country_code) if country_code else ""
     if cc and normalized.startswith(cc):
         return vat_raw, normalized
+    if cc == "EL" and normalized.startswith("GR"):
+        return vat_raw, f"EL{normalized[2:]}"
     if cc and len(normalized) <= 62:
         return vat_raw, f"{cc}{normalized}"
     return vat_raw, normalized
@@ -116,3 +127,74 @@ def is_eu_vat_eligible(*, country_code: str | None, vat_number_normalized: str |
         return False
     return str(vat_number_normalized).upper().startswith(cc)
 
+
+def is_country_in_vies_scope(country_code: str | None) -> bool:
+    if not country_code:
+        return False
+    try:
+        cc = normalize_country_code(country_code)
+    except Exception:  # noqa: BLE001
+        return False
+    return cc in VIES_SCOPE_COUNTRY_CODES
+
+
+def _is_vat_body_plausible(body: str) -> bool:
+    if not body:
+        return False
+    if not body.isalnum():
+        return False
+    return 4 <= len(body) <= 14
+
+
+def get_vies_applicability_status(
+    *,
+    country_code: str | None,
+    vat_number: str | None,
+) -> ViesApplicabilityStatus:
+    if not country_code or not str(country_code).strip():
+        return ViesApplicabilityStatus.INSUFFICIENT_DATA
+    if not vat_number or not str(vat_number).strip():
+        return ViesApplicabilityStatus.INSUFFICIENT_DATA
+
+    try:
+        cc = normalize_country_code(country_code)
+    except Exception:  # noqa: BLE001
+        return ViesApplicabilityStatus.INSUFFICIENT_DATA
+
+    if cc not in VIES_SCOPE_COUNTRY_CODES:
+        return ViesApplicabilityStatus.VIES_NOT_APPLICABLE
+
+    vat_raw, vat_norm = normalize_vat_number(country_code=cc, vat_number=vat_number)
+    if not vat_raw or not vat_norm:
+        return ViesApplicabilityStatus.INSUFFICIENT_DATA
+
+    normalized_input = _NON_ALNUM_RE.sub("", str(vat_raw).upper())
+    if len(normalized_input) >= 2 and normalized_input[:2].isalpha():
+        input_prefix = normalized_input[:2]
+        if input_prefix == "GR":
+            input_prefix = "EL"
+        if input_prefix != cc:
+            return ViesApplicabilityStatus.VIES_FORMAT_SUSPECT
+
+    if not vat_norm.startswith(cc):
+        return ViesApplicabilityStatus.VIES_FORMAT_SUSPECT
+
+    body = vat_norm[len(cc) :]
+    if not _is_vat_body_plausible(body):
+        return ViesApplicabilityStatus.VIES_FORMAT_SUSPECT
+
+    return ViesApplicabilityStatus.VIES_ELIGIBLE
+
+
+def is_vies_eligible(
+    *,
+    country_code: str | None,
+    vat_number: str | None,
+) -> bool:
+    return (
+        get_vies_applicability_status(
+            country_code=country_code,
+            vat_number=vat_number,
+        )
+        == ViesApplicabilityStatus.VIES_ELIGIBLE
+    )

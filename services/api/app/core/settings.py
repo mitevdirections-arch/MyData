@@ -91,6 +91,14 @@ class Settings(BaseSettings):
     perf_profiling_methods: str = "GET"
     perf_profiling_path_prefixes: str = "/orders"
     perf_profiling_window_size: int = 4096
+    # Entity verification provider runtime controls
+    entity_verification_vies_enabled: bool = False
+    entity_verification_vies_connect_timeout_seconds: int = 2
+    entity_verification_vies_read_timeout_seconds: int = 4
+    entity_verification_vies_total_budget_seconds: int = 7
+    entity_verification_vies_retry_count: int = 1
+    entity_verification_vies_retry_backoff_ms: int = 300
+    entity_verification_vies_cooldown_seconds: int = 60
     # Authz fast path (tenant DB effective permissions)
     authz_tenant_db_fast_path_enabled: bool = False
     authz_tenant_db_fast_path_shadow_compare_enabled: bool = False
