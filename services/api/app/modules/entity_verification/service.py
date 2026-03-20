@@ -50,6 +50,7 @@ IDEMPOTENCY_TTL_SECONDS_ENV = "MYDATA_ENTITY_VERIFICATION_IDEMPOTENCY_TTL_SECOND
 PROVIDER_COOLDOWN_SECONDS_ENV = "MYDATA_ENTITY_VERIFICATION_PROVIDER_COOLDOWN_SECONDS"
 MANUAL_CHECK_WINDOW_SECONDS_ENV = "MYDATA_ENTITY_VERIFICATION_MANUAL_CHECK_WINDOW_SECONDS"
 MANUAL_CHECK_WINDOW_MAX_ENV = "MYDATA_ENTITY_VERIFICATION_MANUAL_CHECK_WINDOW_MAX"
+MANUAL_CHECK_WINDOW_USER_MAX_ENV = "MYDATA_ENTITY_VERIFICATION_MANUAL_CHECK_WINDOW_USER_MAX"
 
 DEFAULT_TTL_VERIFIED_HOURS = 168
 DEFAULT_TTL_NOT_VERIFIED_HOURS = 24
@@ -60,6 +61,7 @@ DEFAULT_IDEMPOTENCY_TTL_SECONDS = 120
 DEFAULT_PROVIDER_COOLDOWN_SECONDS = 60
 DEFAULT_MANUAL_CHECK_WINDOW_SECONDS = 300
 DEFAULT_MANUAL_CHECK_WINDOW_MAX = 20
+DEFAULT_MANUAL_CHECK_WINDOW_USER_MAX = 20
 DEFAULT_CIRCUIT_WINDOW_MINUTES = 10
 DEFAULT_CIRCUIT_FAILURE_THRESHOLD = 5
 MAX_EVIDENCE_PAYLOAD_BYTES = 16 * 1024
@@ -118,6 +120,11 @@ class EntityVerificationService:
         self.manual_check_window_max = _env_int(
             MANUAL_CHECK_WINDOW_MAX_ENV,
             DEFAULT_MANUAL_CHECK_WINDOW_MAX,
+            min_value=1,
+        )
+        self.manual_check_window_user_max = _env_int(
+            MANUAL_CHECK_WINDOW_USER_MAX_ENV,
+            DEFAULT_MANUAL_CHECK_WINDOW_USER_MAX,
             min_value=1,
         )
         self.provider_circuit_window_minutes = DEFAULT_CIRCUIT_WINDOW_MINUTES
@@ -413,6 +420,7 @@ class EntityVerificationService:
         idempotency_ttl_seconds: int | None = None,
         manual_check_window_seconds: int | None = None,
         manual_check_window_max: int | None = None,
+        manual_check_window_user_max: int | None = None,
     ) -> InflightAcquireResultDTO:
         tid = self._parse_target_uuid(target_id)
         provider = self._clean(provider_code, 64).upper()
@@ -439,8 +447,38 @@ class EntityVerificationService:
                 else self.manual_check_window_max
             ),
         )
+        manual_window_user_max_count = max(
+            1,
+            int(
+                manual_check_window_user_max
+                if manual_check_window_user_max is not None
+                else self.manual_check_window_user_max
+            ),
+        )
         request = self._clean_opt(request_id, 128)
         started_by = self._clean_opt(started_by_user_id, 255)
+
+        if started_by:
+            recent_user_checks_count = (
+                db.query(EntityVerificationCheck)
+                .filter(
+                    EntityVerificationCheck.provider_code == provider,
+                    EntityVerificationCheck.created_by_user_id == started_by,
+                    EntityVerificationCheck.checked_at >= (now - timedelta(seconds=manual_window_s)),
+                )
+                .count()
+            )
+            if recent_user_checks_count >= manual_window_user_max_count:
+                record_segment("recheck_dedup_hit_count", 1.0)
+                return InflightAcquireResultDTO(
+                    acquired=False,
+                    dedup_hit=True,
+                    cooldown_active=True,
+                    reason="manual_check_user_window_limit",
+                    target_id=str(tid),
+                    provider_code=provider,
+                    lease_expires_at=(now + timedelta(seconds=manual_window_s)).isoformat(),
+                )
 
         recent_checks_count = (
             db.query(EntityVerificationCheck)
