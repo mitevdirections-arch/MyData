@@ -60,6 +60,9 @@ If any mandatory key is missing:
 - only `.env.example` can be committed.
 - never paste real secrets in markdown docs, runbooks, or logs.
 - redact secrets in screenshots or command output.
+- local commits must pass secret pre-commit gate:
+  - `git config core.hooksPath .githooks`
+  - hook entrypoint: `C:\Users\mitev\OneDrive\Документи\MyData\.githooks\pre-commit`
 
 ## Alembic And Runtime Consistency
 - API runtime and Alembic must read the same local config source in `dev`.
@@ -77,6 +80,7 @@ Before shipping changes:
 2. `py -m alembic current` works with expected environment source.
 3. `py -m pytest` critical security tests pass.
 4. no real secrets appear in changed files.
+5. CI secret gates pass (`gitleaks` + `secret_guard.py --all`).
 
 ## Incident Rule
 If secret leakage is suspected:

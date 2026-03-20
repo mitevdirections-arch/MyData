@@ -30,6 +30,10 @@ Important:
 - Never commit real credentials to repository files.
 - Follow environment and secret policy:
   `C:\Users\mitev\OneDrive\Документи\MyData\services\api\docs\env_policy.md`
+- Enable local secret pre-commit gate once per clone:
+```powershell
+git config core.hooksPath .githooks
+```
 
 ## 3) Install and migrate
 ```powershell
