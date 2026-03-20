@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from argparse import ArgumentParser
+import base64
 import json
+import os
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -9,6 +11,10 @@ from fastapi.testclient import TestClient
 from app.core.auth import create_access_token
 from app.core.settings import get_settings
 from app.main import app
+
+
+def _ephemeral_totp_secret() -> str:
+    return base64.b32encode(os.urandom(10)).decode("ascii").rstrip("=")
 
 
 def _result(name: str, ok: bool, detail: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -75,7 +81,7 @@ def run_pack(*, strict: bool) -> dict[str, Any]:
         prev_secret = str(settings.superadmin_step_up_totp_secret or "")
         try:
             settings.superadmin_step_up_enabled = True
-            settings.superadmin_step_up_totp_secret = "JBSWY3DPEHPK3PXP"
+            settings.superadmin_step_up_totp_secret = _ephemeral_totp_secret()
             tok_super = create_access_token({"sub": "superadmin@qa.local", "roles": ["SUPERADMIN"], "tenant_id": "tenant-a"}, ttl_seconds=120)
             r3 = client.post(
                 "/licenses/admin/issue-startup",

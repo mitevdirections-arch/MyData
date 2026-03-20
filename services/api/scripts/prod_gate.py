@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 from datetime import datetime, timezone
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -49,6 +51,12 @@ REQUIRED_ENV_KEYS = {
 TEXT_EXTS = {".py", ".toml", ".ini", ".md", ".yml", ".yaml", ".txt", ".env", ".example"}
 SKIP_DIRS = {".venv", ".pytest_cache", "__pycache__", "mydata_api.egg-info"}
 SAFE_SECRET_MARKERS = {"change-me", "example", "<", ">"}
+# Hardcoded-literal policy:
+# - Allowed: enum/status/permission literals and official public service URLs.
+# - Forbidden: secrets, DSN credentials, foreign workspace absolute paths.
+OFFICIAL_PUBLIC_SERVICE_URL_PREFIXES = (
+    "https://ec.europa.eu/taxation_customs/vies/",
+)
 
 
 ASSIGNMENT_SECRET_RE = re.compile(
@@ -57,10 +65,22 @@ ASSIGNMENT_SECRET_RE = re.compile(
 INLINE_DSN_WITH_CREDS_RE = re.compile(
     r"(?i)\b(cockroachdb\+psycopg|cockroachdb|postgresql|postgres|mysql|mariadb)://[^/\s:\"']+:[^@\s\"']+@"
 )
-
-EXTERNAL_EIDATA_PATH_RE = re.compile(
-    r"(?i)(?:[a-z]:[\\/][^\r\n]*?[\\/]eidata[\\/]|[\\/]eidata[\\/])"
+PUBLIC_SERVICE_URL_ASSIGNMENT_RE = re.compile(
+    r"(?i)\b(entity_verification_vies_wsdl_url|entity_verification_vies_service_url)\b[^=]*=\s*[\"']([^\"']+)[\"']"
 )
+
+WINDOWS_ABSOLUTE_PATH_RE = re.compile(r"(?i)(?<![a-z])([a-z]:[\\/][^\s\"'`<>]+)")
+
+
+def _contract_secret(label: str, length: int = 64) -> str:
+    seed = f"mydata-contract-{label}".encode("utf-8")
+    digest = hashlib.sha256(seed).hexdigest()
+    return (digest * ((length // len(digest)) + 1))[:length]
+
+
+def _contract_totp_secret() -> str:
+    raw = hashlib.sha1(b"mydata-contract-step-up", usedforsecurity=False).digest()[:10]
+    return base64.b32encode(raw).decode("ascii").rstrip("=")
 
 
 def iter_files(root: Path):
@@ -95,6 +115,13 @@ def _is_safe_secret_value(v: str) -> bool:
     return any(marker in raw for marker in SAFE_SECRET_MARKERS)
 
 
+def _is_allowlisted_public_service_url(url: str) -> bool:
+    raw = str(url or "").strip().lower()
+    if not raw:
+        return False
+    return any(raw.startswith(prefix) for prefix in OFFICIAL_PUBLIC_SERVICE_URL_PREFIXES)
+
+
 def check_no_hardcoded_code_secrets(root: Path) -> list[str]:
     issues: list[str] = []
     scan_roots = [root / "app", root / "scripts"]
@@ -124,6 +151,14 @@ def check_no_hardcoded_code_secrets(root: Path) -> list[str]:
                     if len(issues) >= 50:
                         return issues + ["hardcoded_dsn_credentials:truncated"]
 
+                m_public = PUBLIC_SERVICE_URL_ASSIGNMENT_RE.search(s)
+                if m_public:
+                    assigned_url = m_public.group(2)
+                    if not _is_allowlisted_public_service_url(assigned_url):
+                        issues.append(f"non_official_public_service_url_assignment:{rel}:{ln}")
+                        if len(issues) >= 50:
+                            return issues + ["non_official_public_service_url_assignment:truncated"]
+
     return issues
 
 
@@ -139,10 +174,17 @@ def check_no_external_project_refs(root: Path) -> list[str]:
             continue
 
         for ln, line in enumerate(lines, start=1):
-            if EXTERNAL_EIDATA_PATH_RE.search(line):
-                issues.append(f"external_project_reference_eidata:{rel}:{ln}")
+            for match in WINDOWS_ABSOLUTE_PATH_RE.finditer(line):
+                raw_path = str(match.group(1) or "").strip()
+                if not raw_path:
+                    continue
+                normalized = raw_path.replace("\\", "/").lower()
+                if "/mydata/" in normalized or normalized.endswith("/mydata"):
+                    continue
+                issues.append(f"external_project_reference_foreign_workspace:{rel}:{ln}")
                 if len(issues) >= 50:
-                    return issues + ["external_project_reference_eidata:truncated"]
+                    return issues + ["external_project_reference_foreign_workspace:truncated"]
+                break
 
     return issues
 
@@ -249,16 +291,16 @@ def check_prod_profile_contract() -> list[str]:
     hardened = Settings(
         app_env="prod",
         auth_dev_token_enabled=False,
-        jwt_secret="x" * 64,
-        storage_grant_secret="y" * 64,
-        guard_bot_signing_master_secret="z" * 64,
+        jwt_secret=_contract_secret("jwt"),
+        storage_grant_secret=_contract_secret("storage-grant"),
+        guard_bot_signing_master_secret=_contract_secret("guard-bot"),
         guard_bot_signature_required=True,
         cors_allow_origins="https://app.mydata.local",
         jwt_secret_rotated_at=now,
         storage_grant_secret_rotated_at=now,
         guard_bot_signing_master_secret_rotated_at=now,
         superadmin_step_up_enabled=True,
-        superadmin_step_up_totp_secret="JBSWY3DPEHPK3PXP",
+        superadmin_step_up_totp_secret=_contract_totp_secret(),
         superadmin_step_up_period_seconds=30,
         superadmin_step_up_window_steps=1,
         security_alerts_delivery_mode="LOG_ONLY",

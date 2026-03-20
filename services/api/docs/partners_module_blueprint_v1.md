@@ -1,4 +1,4 @@
-﻿# MyData â€” PARTNERS Module Blueprint & Full Module Documentation v1
+# MyData â€” PARTNERS Module Blueprint & Full Module Documentation v1
 
 **Snapshot:** 2026-03-19  
 **Status:** Backend foundation implemented on `main`  

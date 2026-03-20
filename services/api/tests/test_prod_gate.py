@@ -193,17 +193,42 @@ def test_no_hardcoded_code_secrets_ignores_change_me_placeholder(tmp_path: Path)
     issues = check_no_hardcoded_code_secrets(tmp_path)
     assert issues == []
 
+
+def test_no_hardcoded_code_secrets_allows_official_vies_public_urls(tmp_path: Path) -> None:
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    (app_dir / "x.py").write_text(
+        'entity_verification_vies_wsdl_url = "https://ec.europa.eu/taxation_customs/vies/checkVatService.wsdl"\n'
+        'entity_verification_vies_service_url = "https://ec.europa.eu/taxation_customs/vies/services/checkVatService"\n',
+        encoding="utf-8",
+    )
+
+    issues = check_no_hardcoded_code_secrets(tmp_path)
+    assert issues == []
+
+
+def test_no_hardcoded_code_secrets_blocks_non_official_vies_public_url(tmp_path: Path) -> None:
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    (app_dir / "x.py").write_text(
+        'entity_verification_vies_service_url = "https://example.invalid/vies/service"\n',
+        encoding="utf-8",
+    )
+
+    issues = check_no_hardcoded_code_secrets(tmp_path)
+    assert any(x.startswith("non_official_public_service_url_assignment:app/x.py:1") for x in issues)
+
+
 def test_external_project_refs_clean_tmp_path(tmp_path: Path) -> None:
     (tmp_path / "README.md").write_text("Standalone MyData docs only.\n", encoding="utf-8")
     assert check_no_external_project_refs(tmp_path) == []
 
 
-def test_external_project_refs_detect_eidata_path(tmp_path: Path) -> None:
-    project_name = "Ei" + "Data"
-    path = f"Use C:/Users/mitev/Desktop/{project_name}/bin/crdb-start-only.ps1 for startup\n"
+def test_external_project_refs_detect_foreign_workspace_path(tmp_path: Path) -> None:
+    path = "Use C:/Users/mitev/Desktop/ExternalLookup/bin/crdb-start-only.ps1 for startup\n"
     (tmp_path / "RUNBOOK.md").write_text(path, encoding="utf-8")
     issues = check_no_external_project_refs(tmp_path)
-    assert any(x.startswith("external_project_reference_eidata:RUNBOOK.md:1") for x in issues)
+    assert any(x.startswith("external_project_reference_foreign_workspace:RUNBOOK.md:1") for x in issues)
 
 
 def test_workspace_hygiene_clean_tmp_path(tmp_path: Path) -> None:
