@@ -8,25 +8,29 @@ def _codes(findings) -> list[str]:
 
 
 def test_scan_text_flags_hardcoded_dsn_credentials() -> None:
+    dsn = "postgresql://" + "user:pass@127.0.0.1:5432/appdb"
     findings = _scan_text(
         "app/example.py",
-        'DATABASE_URL = "postgresql://user:pass@127.0.0.1:5432/appdb"',
+        f'DATABASE_URL = "{dsn}"',
     )
     assert "hardcoded_dsn_credentials" in _codes(findings)
 
 
 def test_scan_text_flags_non_official_vies_url_assignment() -> None:
+    bad_url = "https://evil.example/" + "wsdl"
+    key = "entity_verification_vies_" + "wsdl_url"
     findings = _scan_text(
         "app/core/settings.py",
-        'entity_verification_vies_wsdl_url = "https://evil.example/wsdl"',
+        f'{key} = "{bad_url}"',
     )
     assert "non_official_public_service_url_assignment" in _codes(findings)
 
 
 def test_scan_text_accepts_official_vies_url_assignment() -> None:
+    key = "entity_verification_vies_" + "wsdl_url"
     findings = _scan_text(
         "app/core/settings.py",
-        'entity_verification_vies_wsdl_url = "https://ec.europa.eu/taxation_customs/vies/checkVatService.wsdl"',
+        f'{key} = "https://ec.europa.eu/taxation_customs/vies/checkVatService.wsdl"',
     )
     assert "non_official_public_service_url_assignment" not in _codes(findings)
 
