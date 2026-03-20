@@ -4,7 +4,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.db.models import WorkspaceOrganizationProfile
+from app.db.models import Tenant, WorkspaceOrganizationProfile
 from app.modules.payments.service_constants import (
     ALLOWED_ENFORCEMENT_MODE,
     ALLOWED_NUMBERING_MODE,
