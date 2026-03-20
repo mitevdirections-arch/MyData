@@ -211,6 +211,18 @@ class EntityVerificationService:
             updated_at=(row.updated_at.isoformat() if row.updated_at else None),
         )
 
+    def get_target(
+        self,
+        db: Session,
+        *,
+        target_id: str | uuid.UUID,
+    ) -> VerificationTargetDTO:
+        tid = self._parse_target_uuid(target_id)
+        row = db.query(EntityVerificationTarget).filter(EntityVerificationTarget.id == tid).first()
+        if row is None:
+            raise ValueError("target_not_found")
+        return self._target_to_dto(row)
+
     def _check_to_dto(self, row: EntityVerificationCheck) -> VerificationCheckDTO:
         return VerificationCheckDTO(
             id=str(row.id),
@@ -228,6 +240,24 @@ class EntityVerificationService:
             created_by_user_id=row.created_by_user_id,
         )
 
+    def list_checks(
+        self,
+        db: Session,
+        *,
+        target_id: str | uuid.UUID,
+        limit: int = 100,
+    ) -> list[VerificationCheckDTO]:
+        tid = self._parse_target_uuid(target_id)
+        lim = max(1, min(500, int(limit)))
+        rows = (
+            db.query(EntityVerificationCheck)
+            .filter(EntityVerificationCheck.target_id == tid)
+            .order_by(EntityVerificationCheck.checked_at.desc())
+            .limit(lim)
+            .all()
+        )
+        return [self._check_to_dto(x) for x in rows]
+
     def _summary_to_dto(self, row: EntityVerificationSummary) -> VerificationSummaryDTO:
         return VerificationSummaryDTO(
             target_id=str(row.target_id),
@@ -242,6 +272,19 @@ class EntityVerificationService:
             badges_json=dict(row.badges_json or {}),
             updated_at=(row.updated_at.isoformat() if row.updated_at else None),
         )
+
+    def get_summary(
+        self,
+        db: Session,
+        *,
+        target_id: str | uuid.UUID,
+    ) -> VerificationSummaryDTO:
+        tid = self._parse_target_uuid(target_id)
+        summary = db.query(EntityVerificationSummary).filter(EntityVerificationSummary.target_id == tid).first()
+        if summary is not None:
+            return self._summary_to_dto(summary)
+        # Scoped fail-safe bootstrap; no provider execution, only local recompute for this target.
+        return self.recompute_verification_summary(db, target_id=tid)
 
     def upsert_verification_target(
         self,

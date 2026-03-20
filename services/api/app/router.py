@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends
 from app.core.policy_matrix import enforce_request_policy
 from app.modules.ai.router import router as ai_router
 from app.modules.country_engine.api_public import router as country_engine_public_router
+from app.modules.entity_verification.router import router as entity_verification_router
 from app.modules.guard.router import router as guard_router
 from app.modules.i18n.router import admin_router as i18n_admin_router, router as i18n_router, super_router as i18n_super_router
 from app.modules.iam.router import router as iam_router
@@ -71,4 +72,5 @@ _include(support_tenant_router, "app.modules.support.router", explicit=True)
 _include(support_super_router, "app.modules.support.router", explicit=True)
 _include(support_public_router, "app.modules.support.router", explicit=True)
 _include(iam_router, "app.modules.iam.router", explicit=True)
+_include(entity_verification_router, "app.modules.entity_verification.router", explicit=True)
 

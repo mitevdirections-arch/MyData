@@ -134,3 +134,53 @@ class VerificationProviderRunDTO(BaseModel):
     applicability_status: ViesApplicabilityStatus
     check: VerificationCheckDTO | None = None
     summary: VerificationSummaryDTO | None = None
+
+
+class VerificationTargetUpsertResponseDTO(BaseModel):
+    ok: bool = True
+    target: VerificationTargetDTO
+
+
+class VerificationTargetDetailResponseDTO(BaseModel):
+    ok: bool = True
+    target: VerificationTargetDTO
+
+
+class VerificationSummaryResponseDTO(BaseModel):
+    ok: bool = True
+    target_id: str
+    summary: VerificationSummaryDTO
+
+
+class VerificationCheckListItemDTO(BaseModel):
+    id: str
+    target_id: str
+    provider_code: str
+    check_type: str
+    status: ProviderStatus
+    checked_at: str
+    expires_at: str | None = None
+    match_score: float | None = None
+    provider_reference: str | None = None
+    provider_message_code: str | None = None
+    provider_message_text: str | None = None
+    applicability_status: ViesApplicabilityStatus | None = None
+    evidence_json: dict[str, Any] | None = None
+
+
+class VerificationChecksResponseDTO(BaseModel):
+    ok: bool = True
+    target_id: str
+    items: list[VerificationCheckListItemDTO] = Field(default_factory=list)
+
+
+class VerificationRecheckRequestDTO(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    provider_code: str = "VIES"
+    request_id: str | None = None
+
+
+class VerificationProviderCheckResponseDTO(BaseModel):
+    ok: bool = True
+    result: VerificationProviderRunDTO
