@@ -181,6 +181,7 @@ def test_inflight_manual_check_window_limit(db) -> None:
         request_id="req-window-limit",
         manual_check_window_seconds=300,
         manual_check_window_max=20,
+        manual_check_window_user_max=1000,
     )
     assert blocked.acquired is False
     assert blocked.dedup_hit is True
