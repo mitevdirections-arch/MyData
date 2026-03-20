@@ -199,6 +199,14 @@ class EntityVerificationService:
                 continue
             if key not in EVIDENCE_ALLOWLIST:
                 continue
+            # Fail-fast on very large single evidence values before truncation.
+            if isinstance(raw_value, str):
+                if len(raw_value.encode("utf-8")) > MAX_EVIDENCE_PAYLOAD_BYTES:
+                    raise ValueError("evidence_payload_too_large")
+            elif isinstance(raw_value, (list, tuple, dict)):
+                raw_blob = json.dumps(raw_value, ensure_ascii=False, default=str, separators=(",", ":")).encode("utf-8")
+                if len(raw_blob) > MAX_EVIDENCE_PAYLOAD_BYTES:
+                    raise ValueError("evidence_payload_too_large")
             out[key] = self._json_safe(raw_value)
         payload_bytes = len(json.dumps(out, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
         if payload_bytes > MAX_EVIDENCE_PAYLOAD_BYTES:

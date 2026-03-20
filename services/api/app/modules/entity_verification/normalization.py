@@ -91,6 +91,9 @@ def normalize_vat_number(
         return vat_raw, normalized
     if cc == "EL" and normalized.startswith("GR"):
         return vat_raw, f"EL{normalized[2:]}"
+    # Keep explicit foreign prefixes untouched; applicability logic must see them as suspect.
+    if cc and len(normalized) >= 2 and normalized[:2].isalpha():
+        return vat_raw, normalized
     if cc and len(normalized) <= 62:
         return vat_raw, f"{cc}{normalized}"
     return vat_raw, normalized
