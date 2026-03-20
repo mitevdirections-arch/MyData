@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import re
 import uuid
 
+from sqlalchemy import case, distinct, func
 from sqlalchemy.orm import Session
 
 from app.db.models import (
@@ -379,24 +380,82 @@ class PartnersService:
         return float(row.execution_quality_stars + row.communication_docs_stars) / 2.0
 
     def _recompute_tenant_summary(self, db: Session, *, company_id: str, partner_id: uuid.UUID) -> TenantPartnerRatingSummary | None:
-        rows = db.query(PartnerOrderRating).filter(PartnerOrderRating.company_id == company_id, PartnerOrderRating.partner_id == partner_id).all()
+        tenant_aggregate = (
+            db.query(
+                func.count(PartnerOrderRating.id),
+                func.sum(case((PartnerOrderRating.payment_expected.is_(True), 1), else_=0)),
+                func.avg(PartnerOrderRating.execution_quality_stars),
+                func.avg(PartnerOrderRating.communication_docs_stars),
+                func.avg(
+                    case(
+                        (PartnerOrderRating.payment_expected.is_(True), PartnerOrderRating.payment_discipline_stars),
+                        else_=None,
+                    )
+                ),
+                func.avg(
+                    case(
+                        (
+                            PartnerOrderRating.payment_expected.is_(True),
+                            (
+                                PartnerOrderRating.execution_quality_stars
+                                + PartnerOrderRating.communication_docs_stars
+                                + PartnerOrderRating.payment_discipline_stars
+                            ),
+                        ),
+                        else_=None,
+                    )
+                ),
+                func.avg(
+                    case(
+                        (
+                            PartnerOrderRating.payment_expected.is_(False),
+                            (PartnerOrderRating.execution_quality_stars + PartnerOrderRating.communication_docs_stars),
+                        ),
+                        else_=None,
+                    )
+                ),
+                func.max(PartnerOrderRating.created_at),
+                func.sum(
+                    case(
+                        (
+                            (PartnerOrderRating.payment_expected.is_(True))
+                            & (PartnerOrderRating.payment_discipline_stars <= 2),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+            )
+            .filter(
+                PartnerOrderRating.company_id == company_id,
+                PartnerOrderRating.partner_id == partner_id,
+            )
+            .one()
+        )
+        rating_count = int(tenant_aggregate[0] or 0)
         summary = db.query(TenantPartnerRatingSummary).filter(TenantPartnerRatingSummary.partner_id == partner_id).first()
-        if not rows:
+        if rating_count <= 0:
             if summary is not None:
                 db.delete(summary)
             return None
 
-        count = len(rows)
-        payment_rows = [x for x in rows if x.payment_expected and x.payment_discipline_stars is not None]
         now = self._now()
+        payment_count = int(tenant_aggregate[1] or 0)
+        non_payment_count = max(0, rating_count - payment_count)
+        overall_sum = 0.0
+        if payment_count > 0 and tenant_aggregate[5] is not None:
+            overall_sum += (float(tenant_aggregate[5]) / 3.0) * payment_count
+        if non_payment_count > 0 and tenant_aggregate[6] is not None:
+            overall_sum += (float(tenant_aggregate[6]) / 2.0) * non_payment_count
+        avg_overall_score = (overall_sum / float(rating_count)) if rating_count > 0 else None
         payload = {
-            "rating_count": count,
-            "avg_execution_quality": sum(float(x.execution_quality_stars) for x in rows) / count,
-            "avg_communication_docs": sum(float(x.communication_docs_stars) for x in rows) / count,
-            "avg_payment_discipline": (sum(float(x.payment_discipline_stars or 0) for x in payment_rows) / len(payment_rows)) if payment_rows else None,
-            "avg_overall_score": sum(self._overall_score(x) for x in rows) / count,
-            "last_rating_at": max((x.created_at for x in rows if x.created_at is not None), default=None),
-            "payment_issue_count": sum(1 for x in payment_rows if int(x.payment_discipline_stars or 0) <= 2),
+            "rating_count": rating_count,
+            "avg_execution_quality": (float(tenant_aggregate[2]) if tenant_aggregate[2] is not None else None),
+            "avg_communication_docs": (float(tenant_aggregate[3]) if tenant_aggregate[3] is not None else None),
+            "avg_payment_discipline": (float(tenant_aggregate[4]) if tenant_aggregate[4] is not None else None),
+            "avg_overall_score": avg_overall_score,
+            "last_rating_at": tenant_aggregate[7],
+            "payment_issue_count": int(tenant_aggregate[8] or 0),
             "updated_at": now,
         }
         if summary is None:
@@ -411,22 +470,94 @@ class PartnersService:
     def _recompute_global_summary(self, db: Session, *, global_company_id: uuid.UUID | None) -> GlobalCompanyReputation | None:
         if global_company_id is None:
             return None
-        partners = db.query(TenantPartner).filter(TenantPartner.global_company_id == global_company_id).all()
-        partner_ids = [x.id for x in partners]
-        ratings = db.query(PartnerOrderRating).filter(PartnerOrderRating.partner_id.in_(partner_ids)).all() if partner_ids else []
-        count = len(ratings)
-        payment_rows = [x for x in ratings if x.payment_expected and x.payment_discipline_stars is not None]
+        partner_aggregate = (
+            db.query(
+                func.count(TenantPartner.id),
+                func.count(distinct(TenantPartner.company_id)),
+                func.sum(case((TenantPartner.is_blacklisted.is_(True), 1), else_=0)),
+            )
+            .filter(TenantPartner.global_company_id == global_company_id)
+            .one()
+        )
+        rating_aggregate = (
+            db.query(
+                func.count(PartnerOrderRating.id),
+                func.sum(case((PartnerOrderRating.payment_expected.is_(True), 1), else_=0)),
+                func.avg(PartnerOrderRating.execution_quality_stars),
+                func.avg(PartnerOrderRating.communication_docs_stars),
+                func.avg(
+                    case(
+                        (PartnerOrderRating.payment_expected.is_(True), PartnerOrderRating.payment_discipline_stars),
+                        else_=None,
+                    )
+                ),
+                func.avg(
+                    case(
+                        (
+                            PartnerOrderRating.payment_expected.is_(True),
+                            (
+                                PartnerOrderRating.execution_quality_stars
+                                + PartnerOrderRating.communication_docs_stars
+                                + PartnerOrderRating.payment_discipline_stars
+                            ),
+                        ),
+                        else_=None,
+                    )
+                ),
+                func.avg(
+                    case(
+                        (
+                            PartnerOrderRating.payment_expected.is_(False),
+                            (PartnerOrderRating.execution_quality_stars + PartnerOrderRating.communication_docs_stars),
+                        ),
+                        else_=None,
+                    )
+                ),
+                func.sum(
+                    case(
+                        (
+                            (PartnerOrderRating.payment_expected.is_(True))
+                            & (PartnerOrderRating.payment_discipline_stars <= 2),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+                func.sum(
+                    case(
+                        (
+                            (PartnerOrderRating.execution_quality_stars <= 2)
+                            | (PartnerOrderRating.communication_docs_stars <= 2),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+            )
+            .join(TenantPartner, TenantPartner.id == PartnerOrderRating.partner_id)
+            .filter(TenantPartner.global_company_id == global_company_id)
+            .one()
+        )
+        total_ratings = int(rating_aggregate[0] or 0)
+        payment_count = int(rating_aggregate[1] or 0)
+        non_payment_count = max(0, total_ratings - payment_count)
+        overall_sum = 0.0
+        if payment_count > 0 and rating_aggregate[5] is not None:
+            overall_sum += (float(rating_aggregate[5]) / 3.0) * payment_count
+        if non_payment_count > 0 and rating_aggregate[6] is not None:
+            overall_sum += (float(rating_aggregate[6]) / 2.0) * non_payment_count
+        global_overall_score = (overall_sum / float(total_ratings)) if total_ratings > 0 else None
         now = self._now()
         payload = {
-            "total_tenants": len({str(x.company_id) for x in partners}),
-            "total_completed_orders_rated": count,
-            "avg_execution_quality": (sum(float(x.execution_quality_stars) for x in ratings) / count) if count else None,
-            "avg_communication_docs": (sum(float(x.communication_docs_stars) for x in ratings) / count) if count else None,
-            "avg_payment_discipline": (sum(float(x.payment_discipline_stars or 0) for x in payment_rows) / len(payment_rows)) if payment_rows else None,
-            "global_overall_score": (sum(self._overall_score(x) for x in ratings) / count) if count else None,
-            "risk_payment_count": sum(1 for x in payment_rows if int(x.payment_discipline_stars or 0) <= 2),
-            "risk_quality_count": sum(1 for x in ratings if int(x.execution_quality_stars or 0) <= 2 or int(x.communication_docs_stars or 0) <= 2),
-            "blacklist_signal_count": sum(1 for x in partners if bool(x.is_blacklisted)),
+            "total_tenants": int(partner_aggregate[1] or 0),
+            "total_completed_orders_rated": total_ratings,
+            "avg_execution_quality": (float(rating_aggregate[2]) if rating_aggregate[2] is not None else None),
+            "avg_communication_docs": (float(rating_aggregate[3]) if rating_aggregate[3] is not None else None),
+            "avg_payment_discipline": (float(rating_aggregate[4]) if rating_aggregate[4] is not None else None),
+            "global_overall_score": global_overall_score,
+            "risk_payment_count": int(rating_aggregate[7] or 0),
+            "risk_quality_count": int(rating_aggregate[8] or 0),
+            "blacklist_signal_count": int(partner_aggregate[2] or 0),
             "updated_at": now,
         }
         row = db.query(GlobalCompanyReputation).filter(GlobalCompanyReputation.global_company_id == global_company_id).first()

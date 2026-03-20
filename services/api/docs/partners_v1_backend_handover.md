@@ -11,6 +11,9 @@
 - RBAC permission hooks + policy matrix + route ownership entries.
 - Marketplace module identity hook for `MODULE_PARTNERS`.
 
+## Blueprint doc
+- Extended module blueprint/reference: `docs/partners_module_blueprint_v1.md`
+
 ## New/changed tables
 - `global_companies`
 - `global_company_reputation`

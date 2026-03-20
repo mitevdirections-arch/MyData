@@ -172,9 +172,10 @@ def test_tenant_db_authz_superadmin_bypass_without_db(monkeypatch) -> None:
 
 def test_require_claims_forged_tenant_context_denied() -> None:
     token = create_access_token({"sub": "user@tenant.local", "tenant_id": "tenant-a", "roles": ["TENANT_ADMIN"]})
+    request = _make_request(path="/orders", claims=None)
 
     with pytest.raises(HTTPException) as exc:
-        require_claims(authorization=f"Bearer {token}", x_tenant_id="tenant-b")
+        require_claims(request=request, authorization=f"Bearer {token}", x_tenant_id="tenant-b")
 
     assert int(exc.value.status_code) == 403
     assert str(exc.value.detail) == "tenant_context_mismatch"
