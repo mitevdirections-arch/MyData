@@ -15,7 +15,7 @@ from app.modules.marketplace.router import router as marketplace_router
 from app.modules.onboarding.router_admin import router as onboarding_admin_router
 from app.modules.onboarding.router_public import router as onboarding_public_router
 from app.modules.orders.router import router as orders_router
-from app.modules.partners.router import router as partners_router
+from app.modules.partners.router import admin_router as partners_admin_router, router as partners_router
 from app.modules.payments.router import admin_router as payments_admin_router, super_router as payments_super_router
 from app.modules.provisioning.router import router as provisioning_router
 from app.modules.profile.router import router as profile_router, super_router as profile_super_router
@@ -66,6 +66,7 @@ _include(payments_admin_router, "app.modules.payments.router", explicit=True)
 _include(payments_super_router, "app.modules.payments.router", explicit=True)
 _include(orders_router, "app.modules.orders.router", explicit=True)
 _include(partners_router, "app.modules.partners.router", explicit=True)
+_include(partners_admin_router, "app.modules.partners.router", explicit=True)
 _include(provisioning_router, "app.modules.provisioning.router", explicit=True)
 _include(security_ops_router, "app.modules.security_ops.router", explicit=True)
 _include(support_tenant_router, "app.modules.support.router", explicit=True)

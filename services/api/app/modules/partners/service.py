@@ -33,6 +33,12 @@ from app.modules.partners.schemas import (
     PartnerUpdateRequestDTO,
     TenantPartnerRatingSummaryDTO,
 )
+from app.modules.entity_verification.schemas import (
+    VerificationSubjectType,
+    VerificationTargetDTO,
+    VerificationTargetUpsertInput,
+)
+from app.modules.entity_verification.service import service as verification_service
 
 ALLOWED_PARTNER_STATUS = {"ACTIVE", "INACTIVE", "SUSPENDED", "ARCHIVED"}
 ALLOWED_ROLE_CODES = {x.value for x in PartnerRoleCode}
@@ -795,6 +801,52 @@ class PartnersService:
         row = self._partner_row(db, company_id=company_id, partner_id=partner_id)
         summary = db.query(TenantPartnerRatingSummary).filter(TenantPartnerRatingSummary.partner_id == row.id).first()
         return self._to_tenant_summary(summary) if summary is not None else None
+
+    def _partner_address_lite(self, db: Session, *, partner_id: uuid.UUID) -> tuple[str | None, str | None, str | None]:
+        row = (
+            db.query(TenantPartnerAddress)
+            .filter(
+                TenantPartnerAddress.partner_id == partner_id,
+                TenantPartnerAddress.archived_at.is_(None),
+            )
+            .order_by(
+                TenantPartnerAddress.is_primary.desc(),
+                TenantPartnerAddress.sort_order.asc(),
+                TenantPartnerAddress.created_at.asc(),
+            )
+            .first()
+        )
+        if row is None:
+            return None, None, None
+        address_line = self._clean_opt(row.line1, 255)
+        postal_code = self._clean_opt(row.postal_code, 32)
+        city = self._clean_opt(row.city, 128)
+        return address_line, postal_code, city
+
+    def resolve_partner_verification_target(
+        self,
+        db: Session,
+        *,
+        company_id: str,
+        partner_id: str,
+    ) -> VerificationTargetDTO:
+        row = self._partner_row(db, company_id=company_id, partner_id=partner_id)
+        address_line, postal_code, city = self._partner_address_lite(db, partner_id=row.id)
+        payload = VerificationTargetUpsertInput(
+            subject_type=VerificationSubjectType.PARTNER,
+            subject_id=str(row.id),
+            owner_company_id=company_id,
+            global_company_id=(str(row.global_company_id) if row.global_company_id else None),
+            legal_name=(row.legal_name or row.display_name),
+            country_code=row.country_code,
+            vat_number=row.vat_number,
+            registration_number=row.registration_number,
+            address_line=address_line,
+            postal_code=postal_code,
+            city=city,
+            website_url=row.website_url,
+        )
+        return verification_service.upsert_verification_target(db, payload=payload)
 
     def get_global_signal(self, db: Session, *, company_id: str, partner_id: str) -> GlobalCompanySignalDTO | None:
         row = self._partner_row(db, company_id=company_id, partner_id=partner_id)

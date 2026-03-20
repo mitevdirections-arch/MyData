@@ -8,6 +8,16 @@ from sqlalchemy.orm import Session
 from app.core.audit import write_audit
 from app.core.auth import require_claim_permission
 from app.db.session import get_db_session
+from app.modules.entity_verification.schemas import (
+    PartnerVerificationRecheckResponseDTO,
+    PartnerVerificationSummaryDTO,
+    PartnerVerificationSummaryResponseDTO,
+    ProviderStatus,
+    VerificationRecheckRequestDTO,
+    VerificationSummaryDTO,
+    ViesApplicabilityStatus,
+)
+from app.modules.entity_verification.service import service as verification_service
 from app.modules.partners.schemas import (
     PartnerBlacklistRequestDTO,
     PartnerDetailResponseDTO,
@@ -24,6 +34,7 @@ from app.modules.partners.schemas import (
 from app.modules.partners.service import service
 
 router = APIRouter(prefix="/partners", tags=["partners"])
+admin_router = APIRouter(prefix="/admin/partners", tags=["partners"])
 
 
 def _tenant_id(claims: dict[str, Any]) -> str:
@@ -49,6 +60,49 @@ def _err_status(detail: str) -> int:
     }:
         return 400
     return 400
+
+
+def _extract_applicability_status(evidence_json: dict[str, Any] | None) -> ViesApplicabilityStatus | None:
+    raw = str((evidence_json or {}).get("applicability_status") or "").strip().upper()
+    if raw in ViesApplicabilityStatus._value2member_map_:
+        return ViesApplicabilityStatus(raw)
+    return None
+
+
+def _partner_verification_view(
+    *,
+    partner_id: str,
+    target_id: str,
+    summary: VerificationSummaryDTO,
+    check: Any | None,
+) -> PartnerVerificationSummaryDTO:
+    provider_status = None
+    applicability_status = None
+    if check is not None:
+        status_value = getattr(check, "status", None)
+        if isinstance(status_value, ProviderStatus):
+            provider_status = status_value
+        else:
+            provider_raw = str(status_value or "").strip().upper()
+            if provider_raw.startswith("PROVIDERSTATUS."):
+                provider_raw = provider_raw.split(".", 1)[1]
+            if provider_raw in ProviderStatus._value2member_map_:
+                provider_status = ProviderStatus(provider_raw)
+        evidence_json = dict(getattr(check, "evidence_json", {}) or {})
+        applicability_status = _extract_applicability_status(evidence_json)
+
+    return PartnerVerificationSummaryDTO(
+        partner_id=partner_id,
+        target_id=target_id,
+        overall_status=summary.overall_status,
+        last_checked_at=summary.last_checked_at,
+        last_verified_at=summary.last_verified_at,
+        next_recommended_check_at=summary.next_recommended_check_at,
+        provider_status=provider_status,
+        applicability_status=applicability_status,
+        provider_code="VIES",
+        non_blocking=True,
+    )
 
 
 @router.get("", response_model=PartnersListResponseDTO)
@@ -300,3 +354,69 @@ def global_signal(
     except ValueError as exc:
         raise HTTPException(status_code=_err_status(str(exc)), detail=str(exc)) from exc
     return PartnerGlobalSignalResponseDTO(ok=True, tenant_id=tenant_id, partner_id=partner_id, global_signal=signal)
+
+
+@admin_router.get("/{partner_id}/verification-summary", response_model=PartnerVerificationSummaryResponseDTO)
+def partner_verification_summary(
+    partner_id: str,
+    claims: dict[str, Any] = Depends(require_claim_permission("PARTNERS.READ")),
+    db: Session = Depends(get_db_session),
+) -> PartnerVerificationSummaryResponseDTO:
+    tenant_id = _tenant_id(claims)
+    try:
+        target = service.resolve_partner_verification_target(db, company_id=tenant_id, partner_id=partner_id)
+        summary = verification_service.get_summary(db, target_id=target.id)
+        check = verification_service.get_latest_provider_check(db, target_id=target.id, provider_code="VIES")
+    except ValueError as exc:
+        raise HTTPException(status_code=_err_status(str(exc)), detail=str(exc)) from exc
+    db.commit()
+    return PartnerVerificationSummaryResponseDTO(
+        ok=True,
+        result=_partner_verification_view(
+            partner_id=partner_id,
+            target_id=target.id,
+            summary=summary,
+            check=check,
+        ),
+    )
+
+
+@admin_router.post("/{partner_id}/verification/recheck", response_model=PartnerVerificationRecheckResponseDTO)
+def partner_verification_recheck(
+    partner_id: str,
+    payload: VerificationRecheckRequestDTO,
+    claims: dict[str, Any] = Depends(require_claim_permission("PARTNERS.WRITE")),
+    db: Session = Depends(get_db_session),
+) -> PartnerVerificationRecheckResponseDTO:
+    tenant_id = _tenant_id(claims)
+    provider_code = str(payload.provider_code or "VIES").strip().upper()
+    if provider_code != "VIES":
+        raise HTTPException(status_code=400, detail="provider_not_supported")
+    actor = str(claims.get("sub") or "unknown")
+    try:
+        target = service.resolve_partner_verification_target(db, company_id=tenant_id, partner_id=partner_id)
+        run_result = verification_service.run_vies_verification_for_target(
+            db,
+            target_id=target.id,
+            created_by_user_id=actor,
+            request_id=payload.request_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=_err_status(str(exc)), detail=str(exc)) from exc
+    db.commit()
+    summary = run_result.summary
+    if summary is None:
+        summary = verification_service.get_summary(db, target_id=target.id)
+    return PartnerVerificationRecheckResponseDTO(
+        ok=True,
+        result=_partner_verification_view(
+            partner_id=partner_id,
+            target_id=target.id,
+            summary=summary,
+            check=run_result.check,
+        ),
+        acquired=run_result.acquired,
+        dedup_hit=run_result.dedup_hit,
+        provider_called=run_result.provider_called,
+        reason=run_result.reason,
+    )

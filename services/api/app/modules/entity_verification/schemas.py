@@ -184,3 +184,30 @@ class VerificationRecheckRequestDTO(BaseModel):
 class VerificationProviderCheckResponseDTO(BaseModel):
     ok: bool = True
     result: VerificationProviderRunDTO
+
+
+class PartnerVerificationSummaryDTO(BaseModel):
+    partner_id: str
+    target_id: str
+    overall_status: SummaryStatus
+    last_checked_at: str | None = None
+    last_verified_at: str | None = None
+    next_recommended_check_at: str | None = None
+    provider_status: ProviderStatus | None = None
+    applicability_status: ViesApplicabilityStatus | None = None
+    provider_code: str = "VIES"
+    non_blocking: bool = True
+
+
+class PartnerVerificationSummaryResponseDTO(BaseModel):
+    ok: bool = True
+    result: PartnerVerificationSummaryDTO
+
+
+class PartnerVerificationRecheckResponseDTO(BaseModel):
+    ok: bool = True
+    result: PartnerVerificationSummaryDTO
+    acquired: bool
+    dedup_hit: bool
+    provider_called: bool
+    reason: str

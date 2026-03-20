@@ -827,6 +827,19 @@ class EntityVerificationService:
             return None
         return self._check_to_dto(row)
 
+    def get_latest_provider_check(
+        self,
+        db: Session,
+        *,
+        target_id: str | uuid.UUID,
+        provider_code: str,
+    ) -> VerificationCheckDTO | None:
+        tid = self._parse_target_uuid(target_id)
+        provider = self._clean(provider_code, 64).upper()
+        if not provider:
+            raise ValueError("provider_code_required")
+        return self._latest_check_for_provider(db, target_id=tid, provider_code=provider)
+
     def _summary_for_target(self, db: Session, *, target_id: uuid.UUID) -> VerificationSummaryDTO | None:
         row = db.query(EntityVerificationSummary).filter(EntityVerificationSummary.target_id == target_id).first()
         if row is None:

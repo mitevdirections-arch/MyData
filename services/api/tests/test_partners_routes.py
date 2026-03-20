@@ -9,3 +9,5 @@ def test_partners_routes_registered(registered_paths: set[str]) -> None:
     assert "/partners/{partner_id}/ratings" in paths
     assert "/partners/{partner_id}/rating-summary" in paths
     assert "/partners/{partner_id}/global-signal" in paths
+    assert "/admin/partners/{partner_id}/verification-summary" in paths
+    assert "/admin/partners/{partner_id}/verification/recheck" in paths
