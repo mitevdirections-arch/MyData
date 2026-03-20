@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import http.client
 import time
-from typing import Any, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol
+from urllib.parse import urlparse
+from xml.etree import ElementTree
+from xml.sax.saxutils import escape
 
 from app.modules.entity_verification.normalization import (
     get_vies_applicability_status,
@@ -17,6 +21,27 @@ from app.modules.entity_verification.schemas import (
     VerificationTargetDTO,
     ViesApplicabilityStatus,
 )
+
+
+VIES_OFFICIAL_WSDL_URL = "https://ec.europa.eu/taxation_customs/vies/checkVatService.wsdl"
+VIES_OFFICIAL_SERVICE_URL = "https://ec.europa.eu/taxation_customs/vies/services/checkVatService"
+VIES_SOAP_ACTION = '""'
+SOAP_NS = "http://schemas.xmlsoap.org/soap/envelope/"
+VIES_NS = "urn:ec.europa.eu:taxud:vies:services:checkVat:types"
+
+UNAVAILABLE_FAULT_CODES = {
+    "SERVICE_UNAVAILABLE",
+    "MS_UNAVAILABLE",
+    "TIMEOUT",
+    "SERVER_BUSY",
+    "GLOBAL_MAX_CONCURRENT_REQ",
+}
+NOT_VERIFIED_FAULT_CODES = {
+    "INVALID_INPUT",
+    "INVALID_REQUESTER_INFO",
+    "INVALID_REQUESTER",
+    "VAT_BLOCKED",
+}
 
 
 class VIESExecutionClient(Protocol):
@@ -35,12 +60,291 @@ class VIESExecutionClient(Protocol):
         ...
 
 
+class VIESHTTPTransport(Protocol):
+    def post_xml(
+        self,
+        *,
+        endpoint_url: str,
+        payload: bytes,
+        soap_action: str,
+        connect_timeout_seconds: int,
+        read_timeout_seconds: int,
+        total_timeout_seconds: float,
+    ) -> bytes:
+        ...
+
+
+class HTTPClientViesTransport:
+    def post_xml(
+        self,
+        *,
+        endpoint_url: str,
+        payload: bytes,
+        soap_action: str,
+        connect_timeout_seconds: int,
+        read_timeout_seconds: int,
+        total_timeout_seconds: float,
+    ) -> bytes:
+        parsed = urlparse(endpoint_url)
+        scheme = str(parsed.scheme or "").strip().lower()
+        if scheme not in {"https", "http"}:
+            raise ValueError("vies_endpoint_scheme_not_supported")
+        host = str(parsed.hostname or "").strip()
+        if not host:
+            raise ValueError("vies_endpoint_host_missing")
+        port = int(parsed.port or (443 if scheme == "https" else 80))
+        path = parsed.path or "/"
+        if parsed.query:
+            path = f"{path}?{parsed.query}"
+
+        connection_cls = http.client.HTTPSConnection if scheme == "https" else http.client.HTTPConnection
+        conn = connection_cls(host, port, timeout=max(0.1, float(connect_timeout_seconds)))
+        started = time.perf_counter()
+        try:
+            conn.request(
+                "POST",
+                path,
+                body=payload,
+                headers={
+                    "Content-Type": "text/xml; charset=utf-8",
+                    "Accept": "text/xml",
+                    "SOAPAction": soap_action,
+                    "User-Agent": "mydata-verifier-vies/1.0",
+                },
+            )
+            response = conn.getresponse()
+            elapsed = time.perf_counter() - started
+            remaining = max(0.1, float(total_timeout_seconds) - elapsed)
+            read_timeout = max(0.1, min(float(read_timeout_seconds), remaining))
+            sock = getattr(conn, "sock", None)
+            if sock is not None:
+                sock.settimeout(read_timeout)
+            body = response.read()
+            if response.status >= 400 and not body:
+                raise RuntimeError(f"vies_http_status_{response.status}")
+            return body
+        finally:
+            conn.close()
+
+
 @dataclass(frozen=True)
 class ViesPreparedInput:
     country_code: str | None
     vat_number_raw: str | None
     vat_number_normalized: str | None
     applicability_status: ViesApplicabilityStatus
+
+
+def _xml_find_text(element: ElementTree.Element, names: list[str]) -> str | None:
+    for name in names:
+        node = element.find(name)
+        if node is None:
+            continue
+        text = str(node.text or "").strip()
+        if text:
+            return text
+    return None
+
+
+def _clean_vat_digits(vat_number: str) -> str:
+    return "".join(ch for ch in str(vat_number or "").upper() if ch.isalnum())
+
+
+class ViesSoapExecutionClient:
+    def __init__(
+        self,
+        *,
+        wsdl_url: str = VIES_OFFICIAL_WSDL_URL,
+        service_url: str = VIES_OFFICIAL_SERVICE_URL,
+        transport: VIESHTTPTransport | None = None,
+        sleep_fn: Callable[[float], None] | None = None,
+    ) -> None:
+        self.wsdl_url = str(wsdl_url or VIES_OFFICIAL_WSDL_URL).strip() or VIES_OFFICIAL_WSDL_URL
+        self.service_url = str(service_url or VIES_OFFICIAL_SERVICE_URL).strip() or VIES_OFFICIAL_SERVICE_URL
+        self.transport = transport or HTTPClientViesTransport()
+        self.sleep_fn = sleep_fn or time.sleep
+
+    def _is_retryable_error(self, exc: Exception) -> bool:
+        if isinstance(exc, (TimeoutError, ConnectionError, OSError, http.client.HTTPException)):
+            return True
+        msg = str(exc or "").upper()
+        return (
+            "VIES_HTTP_STATUS_5" in msg
+            or "VIES_HTTP_STATUS_429" in msg
+            or any(code in msg for code in UNAVAILABLE_FAULT_CODES)
+        )
+
+    def _build_check_vat_envelope(self, *, country_code: str, vat_number: str) -> bytes:
+        payload = (
+            f"<soapenv:Envelope xmlns:soapenv=\"{SOAP_NS}\" xmlns:tns=\"{VIES_NS}\">"
+            "<soapenv:Header/>"
+            "<soapenv:Body>"
+            "<tns:checkVat>"
+            f"<tns:countryCode>{escape(country_code)}</tns:countryCode>"
+            f"<tns:vatNumber>{escape(vat_number)}</tns:vatNumber>"
+            "</tns:checkVat>"
+            "</soapenv:Body>"
+            "</soapenv:Envelope>"
+        )
+        return payload.encode("utf-8")
+
+    def _parse_fault(self, fault: ElementTree.Element) -> Mapping[str, Any]:
+        fault_string = _xml_find_text(
+            fault,
+            [
+                "faultstring",
+                f"{{{SOAP_NS}}}faultstring",
+            ],
+        ) or "VIES fault"
+        fault_code = _xml_find_text(
+            fault,
+            [
+                "faultcode",
+                f"{{{SOAP_NS}}}faultcode",
+            ],
+        )
+        normalized = ""
+        candidate_tokens: list[str] = []
+        for source in (fault_code, fault_string):
+            raw = str(source or "").strip().upper().replace("-", "_")
+            if not raw:
+                continue
+            token = raw.split(":", 1)[-1].split(" ", 1)[0]
+            if not token:
+                continue
+            candidate_tokens.append(token)
+            if token in NOT_VERIFIED_FAULT_CODES or token in UNAVAILABLE_FAULT_CODES:
+                normalized = token
+                break
+        if not normalized:
+            normalized = candidate_tokens[0] if candidate_tokens else "FAULT"
+        if normalized in NOT_VERIFIED_FAULT_CODES:
+            status = "NOT_VERIFIED"
+        elif normalized in UNAVAILABLE_FAULT_CODES:
+            status = "UNAVAILABLE"
+        else:
+            status = "UNAVAILABLE"
+        return {
+            "status": status,
+            "provider_message_code": f"vies_fault_{normalized.lower()}"[:128],
+            "provider_message_text": fault_string[:1024],
+            "provider_raw_status": normalized or "FAULT",
+            "provider_error_code": normalized or None,
+        }
+
+    def _parse_response(self, payload: bytes) -> Mapping[str, Any]:
+        root = ElementTree.fromstring(payload)
+        body = root.find(f".//{{{SOAP_NS}}}Body")
+        if body is None:
+            raise ValueError("vies_response_body_missing")
+
+        fault = body.find(f"{{{SOAP_NS}}}Fault")
+        if fault is not None:
+            return self._parse_fault(fault)
+
+        response = body.find(f".//{{{VIES_NS}}}checkVatResponse")
+        if response is None:
+            response = body.find(".//checkVatResponse")
+        if response is None:
+            raise ValueError("vies_response_missing_checkVatResponse")
+
+        valid_raw = _xml_find_text(response, [f"{{{VIES_NS}}}valid", "valid"]) or "false"
+        valid = valid_raw.strip().lower() == "true"
+        request_identifier = _xml_find_text(
+            response,
+            [
+                f"{{{VIES_NS}}}requestIdentifier",
+                "requestIdentifier",
+                f"{{{VIES_NS}}}requestDate",
+                "requestDate",
+            ],
+        )
+        name_raw = _xml_find_text(response, [f"{{{VIES_NS}}}name", "name"])
+        addr_raw = _xml_find_text(response, [f"{{{VIES_NS}}}address", "address"])
+        name_norm = str(name_raw or "").strip()
+        addr_norm = str(addr_raw or "").strip()
+        return {
+            "status": "VERIFIED" if valid else "NOT_VERIFIED",
+            "valid": valid,
+            "provider_reference": request_identifier,
+            "consultation_reference": request_identifier,
+            "provider_message_code": "vies_valid" if valid else "vies_not_verified",
+            "provider_message_text": (
+                "VIES confirmed active VAT registration." if valid else "VIES did not confirm VAT registration."
+            ),
+            "provider_raw_status": "VALID" if valid else "INVALID",
+            "name_match_status": None if not name_norm or name_norm == "---" else "AVAILABLE",
+            "address_match_status": None if not addr_norm or addr_norm == "---" else "AVAILABLE",
+        }
+
+    def check_vat(
+        self,
+        *,
+        country_code: str,
+        vat_number: str,
+        request_id: str | None = None,
+        connect_timeout_seconds: int = 2,
+        read_timeout_seconds: int = 4,
+        total_budget_seconds: int = 7,
+        retry_count: int = 1,
+        retry_backoff_ms: int = 300,
+    ) -> Mapping[str, Any]:
+        cc = normalize_country_code(country_code)
+        vat = _clean_vat_digits(vat_number)
+        if not cc or not vat:
+            raise ValueError("vies_input_invalid")
+
+        attempts = max(1, int(retry_count) + 1)
+        started = time.perf_counter()
+        last_exc: Exception | None = None
+        for idx in range(attempts):
+            elapsed = time.perf_counter() - started
+            remaining = float(total_budget_seconds) - elapsed
+            if remaining <= 0:
+                raise TimeoutError("vies_total_budget_exceeded")
+            try:
+                envelope = self._build_check_vat_envelope(country_code=cc, vat_number=vat)
+                raw = self.transport.post_xml(
+                    endpoint_url=self.service_url,
+                    payload=envelope,
+                    soap_action=VIES_SOAP_ACTION,
+                    connect_timeout_seconds=max(1, int(connect_timeout_seconds)),
+                    read_timeout_seconds=max(1, int(read_timeout_seconds)),
+                    total_timeout_seconds=max(0.1, remaining),
+                )
+                parsed = dict(self._parse_response(raw))
+                parsed["request_id"] = request_id
+                parsed["source"] = "official_vies_soap"
+                parsed["provider_payload_version"] = "vies_check_vat_v1"
+                return parsed
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                is_last = idx >= (attempts - 1)
+                if is_last or not self._is_retryable_error(exc):
+                    raise
+                elapsed_retry = time.perf_counter() - started
+                remaining_retry = float(total_budget_seconds) - elapsed_retry
+                if remaining_retry <= 0:
+                    raise
+                backoff_seconds = min(max(0.0, float(retry_backoff_ms) / 1000.0), max(0.0, remaining_retry - 0.05))
+                if backoff_seconds > 0:
+                    self.sleep_fn(backoff_seconds)
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("vies_execution_unknown_failure")
+
+
+def build_default_vies_execution_client(
+    *,
+    wsdl_url: str | None = None,
+    service_url: str | None = None,
+    transport: VIESHTTPTransport | None = None,
+) -> ViesSoapExecutionClient:
+    return ViesSoapExecutionClient(
+        wsdl_url=wsdl_url or VIES_OFFICIAL_WSDL_URL,
+        service_url=service_url or VIES_OFFICIAL_SERVICE_URL,
+        transport=transport,
+    )
 
 
 class VIESProviderAdapter(VerificationProviderBase):
@@ -144,6 +448,13 @@ class VIESProviderAdapter(VerificationProviderBase):
             return ProviderStatus.VERIFIED if bool(raw.get("valid")) else ProviderStatus.NOT_VERIFIED
         return ProviderStatus.UNAVAILABLE
 
+    def _vat_for_provider_call(self, prepared: ViesPreparedInput) -> str:
+        vat_norm = str(prepared.vat_number_normalized or "").strip().upper()
+        country = str(prepared.country_code or "").strip().upper()
+        if country and vat_norm.startswith(country):
+            return vat_norm[len(country) :]
+        return vat_norm
+
     def _map_execution_output(
         self,
         *,
@@ -171,6 +482,8 @@ class VIESProviderAdapter(VerificationProviderBase):
             "provider_raw_status": str(raw.get("status") or status.value),
             "provider_call_ms": round(float(provider_call_ms), 3),
             "request_id": request_id,
+            "source": raw.get("source"),
+            "provider_payload_version": raw.get("provider_payload_version"),
         }
         return ProviderCheckResultDTO(
             provider_code=self.provider_code,
@@ -179,7 +492,7 @@ class VIESProviderAdapter(VerificationProviderBase):
             checked_at=checked_at,
             expires_at=expires_at,
             match_score=match_score,
-            provider_reference=str(raw.get("provider_reference") or "")[:255] or None,
+            provider_reference=str(raw.get("provider_reference") or raw.get("consultation_reference") or "")[:255] or None,
             provider_message_code=str(raw.get("provider_message_code") or "")[:128] or None,
             provider_message_text=str(raw.get("provider_message_text") or "")[:1024] or None,
             evidence_json=evidence,
@@ -215,6 +528,7 @@ class VIESProviderAdapter(VerificationProviderBase):
                     "vat_number_normalized": prepared.vat_number_normalized,
                     "provider_raw_status": "provider_disabled",
                     "request_id": request_id,
+                    "source": "official_vies_soap",
                 },
             )
 
@@ -232,6 +546,7 @@ class VIESProviderAdapter(VerificationProviderBase):
                     "vat_number_normalized": prepared.vat_number_normalized,
                     "provider_raw_status": "client_missing",
                     "request_id": request_id,
+                    "source": "official_vies_soap",
                 },
             )
 
@@ -239,7 +554,7 @@ class VIESProviderAdapter(VerificationProviderBase):
         try:
             raw = self.execution_client.check_vat(
                 country_code=str(prepared.country_code),
-                vat_number=str(prepared.vat_number_normalized),
+                vat_number=self._vat_for_provider_call(prepared),
                 request_id=request_id,
                 connect_timeout_seconds=self.connect_timeout_seconds,
                 read_timeout_seconds=self.read_timeout_seconds,
@@ -272,6 +587,6 @@ class VIESProviderAdapter(VerificationProviderBase):
                     "provider_raw_status": "execution_error",
                     "provider_call_ms": round(float(call_ms), 3),
                     "request_id": request_id,
+                    "source": "official_vies_soap",
                 },
             )
-

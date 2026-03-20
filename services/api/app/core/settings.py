@@ -93,6 +93,8 @@ class Settings(BaseSettings):
     perf_profiling_window_size: int = 4096
     # Entity verification provider runtime controls
     entity_verification_vies_enabled: bool = False
+    entity_verification_vies_wsdl_url: str = "https://ec.europa.eu/taxation_customs/vies/checkVatService.wsdl"
+    entity_verification_vies_service_url: str = "https://ec.europa.eu/taxation_customs/vies/services/checkVatService"
     entity_verification_vies_connect_timeout_seconds: int = 2
     entity_verification_vies_read_timeout_seconds: int = 4
     entity_verification_vies_total_budget_seconds: int = 7

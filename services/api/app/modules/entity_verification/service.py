@@ -39,7 +39,7 @@ from app.modules.entity_verification.schemas import (
     VerificationTargetUpsertInput,
     ViesApplicabilityStatus,
 )
-from app.modules.entity_verification.providers.vies import VIESProviderAdapter
+from app.modules.entity_verification.providers.vies import VIESProviderAdapter, build_default_vies_execution_client
 
 TTL_VERIFIED_HOURS_ENV = "MYDATA_ENTITY_VERIFICATION_TTL_VERIFIED_HOURS"
 TTL_NOT_VERIFIED_HOURS_ENV = "MYDATA_ENTITY_VERIFICATION_TTL_NOT_VERIFIED_HOURS"
@@ -109,6 +109,22 @@ class EntityVerificationService:
         self.provider_circuit_window_minutes = DEFAULT_CIRCUIT_WINDOW_MINUTES
         self.provider_circuit_failure_threshold = DEFAULT_CIRCUIT_FAILURE_THRESHOLD
         self.vies_enabled = bool(getattr(settings, "entity_verification_vies_enabled", False))
+        self.vies_wsdl_url = str(
+            getattr(
+                settings,
+                "entity_verification_vies_wsdl_url",
+                "https://ec.europa.eu/taxation_customs/vies/checkVatService.wsdl",
+            )
+            or "https://ec.europa.eu/taxation_customs/vies/checkVatService.wsdl"
+        ).strip()
+        self.vies_service_url = str(
+            getattr(
+                settings,
+                "entity_verification_vies_service_url",
+                "https://ec.europa.eu/taxation_customs/vies/services/checkVatService",
+            )
+            or "https://ec.europa.eu/taxation_customs/vies/services/checkVatService"
+        ).strip()
         self.vies_connect_timeout_seconds = int(getattr(settings, "entity_verification_vies_connect_timeout_seconds", 2))
         self.vies_read_timeout_seconds = int(getattr(settings, "entity_verification_vies_read_timeout_seconds", 4))
         self.vies_total_budget_seconds = int(getattr(settings, "entity_verification_vies_total_budget_seconds", 7))
@@ -851,9 +867,15 @@ class EntityVerificationService:
         *,
         execution_client: Any = None,
     ) -> VIESProviderAdapter:
+        effective_client = execution_client
+        if effective_client is None and self.vies_enabled:
+            effective_client = build_default_vies_execution_client(
+                wsdl_url=self.vies_wsdl_url,
+                service_url=self.vies_service_url,
+            )
         return VIESProviderAdapter(
             enabled=self.vies_enabled,
-            execution_client=execution_client,
+            execution_client=effective_client,
             connect_timeout_seconds=self.vies_connect_timeout_seconds,
             read_timeout_seconds=self.vies_read_timeout_seconds,
             total_budget_seconds=self.vies_total_budget_seconds,
@@ -970,6 +992,8 @@ class EntityVerificationService:
                 },
             )
         else:
+            # Ensure the external provider call does not run inside a long DB transaction.
+            db.commit()
             started = time.perf_counter()
             provider_result = provider_adapter.run_check(target=target, request_id=request_id)
             provider_call_ms = (time.perf_counter() - started) * 1000.0
