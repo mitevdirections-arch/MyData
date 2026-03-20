@@ -28,6 +28,8 @@ Fill required values in `.env`:
 Important:
 - Keep `.env` local only.
 - Never commit real credentials to repository files.
+- Follow environment and secret policy:
+  `C:\Users\mitev\OneDrive\Документи\MyData\services\api\docs\env_policy.md`
 
 ## 3) Install and migrate
 ```powershell
