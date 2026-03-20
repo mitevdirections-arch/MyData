@@ -211,3 +211,29 @@ class PartnerVerificationRecheckResponseDTO(BaseModel):
     dedup_hit: bool
     provider_called: bool
     reason: str
+
+
+class CompanyVerificationSummaryDTO(BaseModel):
+    target_id: str
+    overall_status: SummaryStatus
+    last_checked_at: str | None = None
+    last_verified_at: str | None = None
+    next_recommended_check_at: str | None = None
+    provider_status: ProviderStatus | None = None
+    applicability_status: ViesApplicabilityStatus | None = None
+    provider_code: str = "VIES"
+    non_blocking: bool = True
+
+
+class CompanyVerificationSummaryResponseDTO(BaseModel):
+    ok: bool = True
+    result: CompanyVerificationSummaryDTO
+
+
+class CompanyVerificationRecheckResponseDTO(BaseModel):
+    ok: bool = True
+    result: CompanyVerificationSummaryDTO
+    acquired: bool
+    dedup_hit: bool
+    provider_called: bool
+    reason: str

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 
 from app.core.policy_matrix import enforce_request_policy
 from app.modules.ai.router import router as ai_router
+from app.modules.company_profile.router import router as company_profile_router
 from app.modules.country_engine.api_public import router as country_engine_public_router
 from app.modules.entity_verification.router import router as entity_verification_router
 from app.modules.guard.router import router as guard_router
@@ -64,6 +65,7 @@ _include(i18n_super_router, "app.modules.i18n.router")
 _include(marketplace_router, "app.modules.marketplace.router", explicit=True)
 _include(payments_admin_router, "app.modules.payments.router", explicit=True)
 _include(payments_super_router, "app.modules.payments.router", explicit=True)
+_include(company_profile_router, "app.modules.company_profile.router", explicit=True)
 _include(orders_router, "app.modules.orders.router", explicit=True)
 _include(partners_router, "app.modules.partners.router", explicit=True)
 _include(partners_admin_router, "app.modules.partners.router", explicit=True)
