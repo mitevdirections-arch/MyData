@@ -1,6 +1,6 @@
 """workspace user primary invariant hardening
 
-Revision ID: 0035_workspace_user_primary_invariant
+Revision ID: 0035_ws_user_primary
 Revises: 0034_entity_verification_v1
 Create Date: 2026-03-22
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from alembic import op
 
 
-revision = "0035_workspace_user_primary_invariant"
+revision = "0035_ws_user_primary"
 down_revision = "0034_entity_verification_v1"
 branch_labels = None
 depends_on = None
