@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.audit import write_audit
 from app.core.auth import require_claims, require_superadmin, require_tenant_admin
 from app.db.session import get_db_session
+from app.modules.licensing.core_catalog import DEFAULT_CORE_PLAN_CODE
 from app.modules.licensing.service import service
 
 router = APIRouter(prefix="/licenses", tags=["licensing"])
@@ -140,6 +141,7 @@ def issue_startup(payload: dict[str, Any], claims: dict[str, Any] = Depends(requ
     tenant_id = str(payload.get("tenant_id") or "").strip()
     admin_confirmed = bool(payload.get("admin_confirmed", False))
     note = str(payload.get("note") or "").strip() or None
+    core_plan_code = str(payload.get("core_plan_code") or "").strip() or None
 
     if not tenant_id:
         raise HTTPException(status_code=400, detail="tenant_id_required")
@@ -151,6 +153,7 @@ def issue_startup(payload: dict[str, Any], claims: dict[str, Any] = Depends(requ
             requested_by=str(claims.get("sub") or "unknown"),
             admin_confirmed=admin_confirmed,
             note=note,
+            core_plan_code=core_plan_code,
         )
     except ValueError as exc:
         detail = str(exc)
@@ -239,7 +242,7 @@ def reject_issue_request(request_id: str, payload: dict[str, Any] | None = None,
 @router.post("/admin/issue-core")
 def issue_core(payload: dict[str, Any], claims: dict[str, Any] = Depends(require_superadmin), db: Session = Depends(get_db_session)) -> dict[str, Any]:
     tenant_id = str(payload.get("tenant_id") or "").strip()
-    plan_code = str(payload.get("plan_code") or "CORE8").strip().upper()
+    plan_code = str(payload.get("plan_code") or DEFAULT_CORE_PLAN_CODE).strip().upper()
     valid_days_raw = payload.get("valid_days")
 
     if not tenant_id:

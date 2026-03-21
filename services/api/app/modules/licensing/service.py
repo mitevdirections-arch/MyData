@@ -5,25 +5,24 @@ import hashlib
 import json
 import os
 import re
+from typing import Any
 import uuid
 
-from sqlalchemy import and_, bindparam, case, or_, select
+from sqlalchemy import and_, bindparam, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
-from app.db.models import DeviceLease, License, LicenseIssueRequest, LicenseIssuancePolicy, Tenant
-
-CORE_PLAN_SEATS: dict[str, int] = {
-    "CORE3": 3,
-    "CORE5": 5,
-    "CORE8": 8,
-    "CORE13": 13,
-    "CORE21": 21,
-    "CORE24": 24,
-    "CORE34": 34,
-    "CORE45": 45,
-}
-UNLIMITED_CORE_PLANS: set[str] = {"COREENTERPRISE", "CORE_ENT"}
+from app.db.models import DeviceLease, License, LicenseIssueRequest, LicenseIssuancePolicy, Tenant, WorkspaceUser
+from app.modules.licensing.core_catalog import (
+    DEFAULT_CORE_PLAN_CODE,
+    catalog_items,
+    canonical_plan_code,
+    is_supported_plan_code,
+    next_upgrade_plan,
+    plan_definition,
+    seat_limit_for_plan,
+    seat_upgrade_hint,
+)
 ALNUM_RE = re.compile(r"[^A-Z0-9]")
 ISSUANCE_MODES = {"AUTO", "SEMI", "MANUAL"}
 ENTITLEMENT_QUERY_MODE_ENV = "MYDATA_PERF_ENTITLEMENT_QUERY_MODE"
@@ -56,6 +55,19 @@ _RESOLVE_MODULE_ENTITLEMENT_STMT = (
     )
     .limit(1)
 )
+
+
+class LicensingPolicyError(ValueError):
+    def __init__(self, code: str, *, payload: dict[str, Any] | None = None) -> None:
+        self.code = str(code or "LICENSING_POLICY_ERROR").strip().upper() or "LICENSING_POLICY_ERROR"
+        self.payload: dict[str, Any] = dict(payload or {})
+        super().__init__(self.code)
+
+    def to_detail(self) -> dict[str, Any]:
+        return {
+            "code": self.code,
+            **self.payload,
+        }
 
 
 class LicensingService:
@@ -125,16 +137,34 @@ class LicensingService:
         return record.status == "ACTIVE" and record.valid_from <= now <= record.valid_to
 
     def _normalize_core_plan(self, module_code: str | None) -> str:
-        code = str(module_code or "CORE8").strip().upper()
-        if code == "CORE_ENTERPRISE":
-            return "COREENTERPRISE"
-        return code
+        return canonical_plan_code(module_code, default=DEFAULT_CORE_PLAN_CODE)
 
     def _seat_limit_for_plan(self, module_code: str | None) -> int | None:
-        code = self._normalize_core_plan(module_code)
-        if code in UNLIMITED_CORE_PLANS:
-            return None
-        return CORE_PLAN_SEATS.get(code)
+        return seat_limit_for_plan(self._normalize_core_plan(module_code))
+
+    def core_plan_catalog(
+        self,
+        *,
+        include_legacy: bool = False,
+        public_only: bool = False,
+        marketplace_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "plan_code": item.plan_code,
+                "seat_limit": item.seat_limit,
+                "next_upgrade_plan_code": item.next_upgrade_plan_code,
+                "public_visible": bool(item.public_visible),
+                "marketplace_visible": bool(item.marketplace_visible),
+                "self_service_eligible": bool(item.self_service_eligible),
+                "legacy": bool(item.legacy),
+            }
+            for item in catalog_items(
+                include_legacy=include_legacy,
+                public_only=public_only,
+                marketplace_only=marketplace_only,
+            )
+        ]
 
     def get_active_core(self, db: Session, tenant_id: str) -> License | None:
         now = datetime.now(timezone.utc)
@@ -439,6 +469,7 @@ class LicensingService:
         requested_by: str,
         admin_confirmed: bool = False,
         note: str | None = None,
+        core_plan_code: str | None = None,
     ) -> dict:
         existing_startup = db.query(License).filter(License.tenant_id == tenant_id, License.license_type == "STARTUP").first()
         if existing_startup is not None:
@@ -448,7 +479,7 @@ class LicensingService:
         mode = str(policy.get("mode") or "SEMI").upper()
 
         if mode == "AUTO" or (mode == "SEMI" and bool(admin_confirmed)):
-            issued = self.issue_startup_with_core(db=db, tenant_id=tenant_id)
+            issued = self.issue_startup_with_core(db=db, tenant_id=tenant_id, core_plan_code=core_plan_code)
             return {
                 "ok": True,
                 "flow": "ISSUED",
@@ -456,12 +487,14 @@ class LicensingService:
                 "tenant_id": tenant_id,
                 "issued": issued.get("issued") or [],
                 "license_visual_codes": issued.get("license_visual_codes") or {},
+                "core_plan_code": self._normalize_core_plan(core_plan_code),
             }
 
         request_payload = {
             "action": "ISSUE_STARTUP_CORE",
             "admin_confirmed": bool(admin_confirmed),
             "note": str(note or "").strip() or None,
+            "core_plan_code": self._normalize_core_plan(core_plan_code),
         }
         req = self.create_issue_request(
             db,
@@ -475,6 +508,7 @@ class LicensingService:
             "flow": "PENDING_APPROVAL",
             "mode": mode,
             "tenant_id": tenant_id,
+            "core_plan_code": self._normalize_core_plan(core_plan_code),
             "request": req,
         }
 
@@ -493,7 +527,12 @@ class LicensingService:
         if row.request_type != "STARTUP_CORE":
             raise ValueError("request_type_unsupported")
 
-        issued = self.issue_startup_with_core(db=db, tenant_id=row.tenant_id)
+        payload = dict(row.payload_json or {})
+        issued = self.issue_startup_with_core(
+            db=db,
+            tenant_id=row.tenant_id,
+            core_plan_code=(payload.get("core_plan_code") if isinstance(payload, dict) else None),
+        )
 
         now = datetime.now(timezone.utc)
         row.status = "ISSUED"
@@ -616,10 +655,14 @@ class LicensingService:
         }
 
     def count_active_leased_users(self, db: Session, tenant_id: str, *, exclude_user_id: str | None = None) -> int:
-        q = db.query(DeviceLease).filter(DeviceLease.tenant_id == tenant_id, DeviceLease.is_active == True)  # noqa: E712
+        q = db.query(func.count(func.distinct(DeviceLease.user_id))).filter(
+            DeviceLease.tenant_id == tenant_id,
+            DeviceLease.is_active == True,  # noqa: E712
+            DeviceLease.state == "ACTIVE",
+        )
         if exclude_user_id:
             q = q.filter(DeviceLease.user_id != exclude_user_id)
-        return int(q.count())
+        return int(q.scalar() or 0)
 
     def assert_seat_available(self, db: Session, *, tenant_id: str, user_id: str, exclude_user_id: str | None = None) -> dict:
         entitlement = self.resolve_core_entitlement(db, tenant_id)
@@ -641,6 +684,117 @@ class LicensingService:
             "active_users_after_lease": used + 1,
             "core_valid_to": entitlement["core_valid_to"],
         }
+
+    def count_active_tenant_users(self, db: Session, tenant_id: str, *, exclude_user_id: str | None = None) -> int:
+        q = db.query(func.count(func.distinct(WorkspaceUser.user_id))).filter(
+            WorkspaceUser.workspace_type == "TENANT",
+            WorkspaceUser.workspace_id == tenant_id,
+            WorkspaceUser.employment_status == "ACTIVE",
+        )
+        if exclude_user_id:
+            q = q.filter(WorkspaceUser.user_id != str(exclude_user_id))
+        return int(q.scalar() or 0)
+
+    def evaluate_upgrade_need(self, *, current_plan_code: str | None, target_active_users: int) -> dict[str, Any]:
+        current_code = self._normalize_core_plan(current_plan_code)
+        current_limit = self._seat_limit_for_plan(current_code)
+        hint = seat_upgrade_hint(current_plan_code=current_code, target_active_users=target_active_users)
+        return {
+            **hint,
+            "current_seat_limit": current_limit,
+            "upgrade_required": bool(current_limit is not None and int(target_active_users) > int(current_limit)),
+        }
+
+    def evaluate_downgrade(self, *, current_plan_code: str | None, target_plan_code: str | None, current_active_users: int) -> dict[str, Any]:
+        current_code = self._normalize_core_plan(current_plan_code)
+        target_code = self._normalize_core_plan(target_plan_code)
+        current_limit = self._seat_limit_for_plan(current_code)
+        target_limit = self._seat_limit_for_plan(target_code)
+        active_users = max(0, int(current_active_users))
+
+        if target_limit is None:
+            users_to_remove = 0
+            allowed = True
+        else:
+            users_to_remove = max(0, active_users - int(target_limit))
+            allowed = users_to_remove == 0
+
+        payload = {
+            "current_plan_code": current_code,
+            "target_plan_code": target_code,
+            "current_seat_limit": current_limit,
+            "target_seat_limit": target_limit,
+            "current_active_users": active_users,
+            "users_to_remove_from_active_roster": users_to_remove,
+        }
+        if not allowed:
+            payload["code"] = "CORE_DOWNGRADE_REQUIRES_USER_REDUCTION"
+        return payload
+
+    def assert_workspace_user_seat_available(
+        self,
+        db: Session,
+        *,
+        tenant_id: str,
+        user_id: str,
+        exclude_user_id: str | None = None,
+    ) -> dict[str, Any]:
+        entitlement = self.resolve_core_entitlement(db, tenant_id)
+        if not bool(entitlement.get("has_core")):
+            raise LicensingPolicyError(
+                "CORE_REQUIRED",
+                payload={
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                },
+            )
+
+        seat_limit = entitlement.get("seat_limit")
+        used = self.count_active_tenant_users(db, tenant_id, exclude_user_id=exclude_user_id)
+        attempted = int(used) + 1
+        plan_code = str(entitlement.get("plan_code") or "")
+
+        if seat_limit is not None and attempted > int(seat_limit):
+            upgrade = self.evaluate_upgrade_need(current_plan_code=plan_code, target_active_users=attempted)
+            raise LicensingPolicyError(
+                "CORE_SEAT_LIMIT_EXCEEDED",
+                payload={
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "current_plan_code": plan_code,
+                    "seat_limit": int(seat_limit),
+                    "active_user_count": int(used),
+                    "attempted_user_count": attempted,
+                    "next_plan_code": upgrade.get("next_plan_code"),
+                    "recommended_plan_code": upgrade.get("recommended_plan_code"),
+                    "marketplace_upgrade_hint": upgrade.get("marketplace_upgrade_hint"),
+                    "core_valid_to": entitlement.get("core_valid_to"),
+                },
+            )
+
+        return {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "current_plan_code": plan_code,
+            "seat_limit": seat_limit,
+            "active_user_count": int(used),
+            "attempted_user_count": attempted,
+            "next_plan_code": next_upgrade_plan(plan_code),
+            "core_valid_to": entitlement.get("core_valid_to"),
+        }
+
+    def assert_downgrade_allowed(self, *, current_plan_code: str | None, target_plan_code: str | None, current_active_users: int) -> dict[str, Any]:
+        assessment = self.evaluate_downgrade(
+            current_plan_code=current_plan_code,
+            target_plan_code=target_plan_code,
+            current_active_users=current_active_users,
+        )
+        if int(assessment.get("users_to_remove_from_active_roster") or 0) > 0:
+            raise LicensingPolicyError(
+                "CORE_DOWNGRADE_REQUIRES_USER_REDUCTION",
+                payload=assessment,
+            )
+        return assessment
 
     def _tenant_vat(self, db: Session, tenant_id: str) -> str | None:
         row = db.query(Tenant).filter(Tenant.id == tenant_id).first()
@@ -776,7 +930,7 @@ class LicensingService:
             )
         return out
 
-    def issue_startup_with_core(self, db: Session, tenant_id: str, days: int = 30) -> dict:
+    def issue_startup_with_core(self, db: Session, tenant_id: str, days: int = 30, core_plan_code: str | None = None) -> dict:
         now = datetime.now(timezone.utc)
         existing_startup = db.query(License).filter(License.tenant_id == tenant_id, License.license_type == "STARTUP").first()
         if existing_startup is not None:
@@ -784,6 +938,9 @@ class LicensingService:
 
         valid_to = now + timedelta(days=days)
         vat = self._tenant_vat(db, tenant_id)
+        core_plan = self._normalize_core_plan(core_plan_code)
+        if not is_supported_plan_code(core_plan):
+            raise ValueError("core_plan_invalid")
 
         startup_id = uuid.uuid4()
         core_id = uuid.uuid4()
@@ -809,10 +966,10 @@ class LicensingService:
             tenant_id=tenant_id,
             license_type="CORE",
             status="ACTIVE",
-            module_code="CORE8",
+            module_code=core_plan,
             license_visual_code=self.build_license_visual_code(
                 license_type="CORE",
-                module_code="CORE8",
+                module_code=core_plan,
                 issued_at=now,
                 vat_number=vat,
                 internal_seed=str(core_id),
@@ -828,6 +985,7 @@ class LicensingService:
             "ok": True,
             "tenant_id": tenant_id,
             "issued": ["STARTUP", "CORE"],
+            "core_plan_code": core_plan,
             "license_visual_codes": {
                 "STARTUP": startup.license_visual_code,
                 "CORE": core.license_visual_code,
@@ -835,7 +993,7 @@ class LicensingService:
         }
 
 
-    def issue_core_only(self, db: Session, *, tenant_id: str, plan_code: str = "CORE8", days: int = 30) -> dict:
+    def issue_core_only(self, db: Session, *, tenant_id: str, plan_code: str = DEFAULT_CORE_PLAN_CODE, days: int = 30) -> dict:
         tid = str(tenant_id or "").strip()
         if not tid:
             raise ValueError("tenant_id_required")
@@ -843,7 +1001,7 @@ class LicensingService:
             raise ValueError("tenant_not_found")
 
         plan = self._normalize_core_plan(plan_code)
-        if plan not in CORE_PLAN_SEATS and plan not in UNLIMITED_CORE_PLANS:
+        if not is_supported_plan_code(plan):
             raise ValueError("core_plan_invalid")
 
         now = datetime.now(timezone.utc)

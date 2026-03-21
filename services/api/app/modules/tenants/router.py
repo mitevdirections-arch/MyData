@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import require_superadmin
 from app.db.models import Tenant
 from app.db.session import get_db_session
-from app.modules.profile.user_domain_service import service as user_domain_service
+from app.modules.users.service import service as user_domain_service
 
 router = APIRouter(prefix="/admin/tenants", tags=["tenants"])
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.modules.licensing.core_catalog import catalog_items
+
 WORKSPACE_TENANT = "TENANT"
 WORKSPACE_PLATFORM = "PLATFORM"
 PLATFORM_WORKSPACE_ID = "platform"
@@ -10,8 +12,17 @@ PLATFORM_WORKSPACE_ID = "platform"
 ROLE_CODE_RE = re.compile(r"[^A-Z0-9_]")
 PERM_RE = re.compile(r"[^A-Z0-9_.*:]")
 
-CORE_PLAN_SEATS: dict[str, int] = {"CORE3": 3, "CORE5": 5, "CORE8": 8, "CORE13": 13, "CORE21": 21, "CORE24": 24, "CORE34": 34, "CORE45": 45}
-UNLIMITED_CORE_PLANS: set[str] = {"COREENTERPRISE", "CORE_ENT"}
+_CORE_ITEMS = catalog_items(include_legacy=True)
+CORE_PLAN_SEATS: dict[str, int] = {
+    str(item.plan_code): int(item.seat_limit)
+    for item in _CORE_ITEMS
+    if item.seat_limit is not None
+}
+UNLIMITED_CORE_PLANS: set[str] = {
+    str(item.plan_code)
+    for item in _CORE_ITEMS
+    if item.seat_limit is None
+}
 
 DEFAULT_TENANT_ROLES: list[dict[str, Any]] = [
     {"role_code": "TENANT_ADMIN", "role_name": "Tenant Administrator", "permissions": ["*"]},

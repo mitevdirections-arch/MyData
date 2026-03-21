@@ -9,9 +9,10 @@ from app.core.settings import get_settings
 from app.db.models import Tenant
 from app.modules.guard.service import service as guard_service
 from app.modules.i18n.service import service as i18n_service
+from app.modules.licensing.core_catalog import DEFAULT_CORE_PLAN_CODE, canonical_plan_code
 from app.modules.licensing.service import service as licensing_service
 from app.modules.profile.service import WORKSPACE_TENANT, service as profile_service
-from app.modules.profile.user_domain_service import service as user_domain_service
+from app.modules.users.service import service as user_domain_service
 from app.modules.public_portal import service as public_portal_service
 
 
@@ -58,6 +59,10 @@ class ProvisioningService:
     def _provision_issuance(self, db: Session, *, tenant_id: str, actor: str, payload: dict[str, Any]) -> dict[str, Any]:
         issuance = self._as_dict(payload.get("issuance"))
         requested_mode = self._clean_text(issuance.get("mode"), 16)
+        requested_core_plan = canonical_plan_code(
+            self._clean_text(issuance.get("core_plan_code"), 64),
+            default=DEFAULT_CORE_PLAN_CODE,
+        )
         if requested_mode:
             policy = licensing_service.set_issuance_policy(db, tenant_id=tenant_id, mode=requested_mode, actor=actor)
         else:
@@ -84,6 +89,7 @@ class ProvisioningService:
                     requested_by=actor,
                     admin_confirmed=admin_confirmed,
                     note=note,
+                    core_plan_code=requested_core_plan,
                 )
             except ValueError as exc:
                 if str(exc) != "startup_non_renewable":
@@ -99,6 +105,7 @@ class ProvisioningService:
         return {
             "policy": policy,
             "startup": startup,
+            "core_plan_code": requested_core_plan,
             "entitlement_v2": licensing_service.entitlement_snapshot_v2(db, tenant_id=tenant_id),
         }
 
