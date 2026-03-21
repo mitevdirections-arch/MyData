@@ -1,26 +1,6 @@
 from __future__ import annotations
 
-from app.modules.profile.user_domain_service_parts import (
-    UserDomainAddressesMixin,
-    UserDomainContactsMixin,
-    UserDomainCredentialsMixin,
-    UserDomainDocumentsMixin,
-    UserDomainNextOfKinMixin,
-    UserDomainSharedMixin,
-    UserDomainUsersMixin,
-)
+from app.modules.users.service import UsersService as UserDomainService
+from app.modules.users.service import service
 
-
-class UserDomainService(
-    UserDomainSharedMixin,
-    UserDomainUsersMixin,
-    UserDomainContactsMixin,
-    UserDomainAddressesMixin,
-    UserDomainDocumentsMixin,
-    UserDomainNextOfKinMixin,
-    UserDomainCredentialsMixin,
-):
-    """Compatibility facade preserving the original public service contract."""
-
-
-service = UserDomainService()
+__all__ = ["UserDomainService", "service"]

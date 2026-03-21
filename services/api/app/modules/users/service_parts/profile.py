@@ -20,10 +20,10 @@ from app.db.models import (
     WorkspaceUserNextOfKin,
     WorkspaceUserProfile,
 )
-from app.modules.profile.service import PLATFORM_WORKSPACE_ID, WORKSPACE_PLATFORM, WORKSPACE_TENANT, service as workspace_service
-from app.modules.profile import user_domain_ops
+from app.modules.profile.service import service as profile_service
+from app.modules.profile.service_constants import PLATFORM_WORKSPACE_ID, WORKSPACE_PLATFORM, WORKSPACE_TENANT
 
-class UserDomainUsersMixin:
+class UsersProfileMixin:
     def get_or_create_user_profile(self, db: Session, *, workspace_type: str, workspace_id: str, user_id: str, actor: str) -> dict[str, Any]:
 
         wtype, wid = self._normalize_workspace(workspace_type, workspace_id)
@@ -385,7 +385,7 @@ address_country_code=None,
 
 
 
-        workspace_user = workspace_service.upsert_workspace_user(
+        workspace_user = self.upsert_workspace_user(
 
             db,
 
@@ -419,7 +419,7 @@ address_country_code=None,
 
 
 
-        with_roles = workspace_service.set_workspace_user_roles(
+        with_roles = self.set_workspace_user_roles(
 
             db,
 
@@ -437,7 +437,7 @@ address_country_code=None,
 
 
 
-        admin_profile = workspace_service.get_or_create_admin_profile(
+        admin_profile = profile_service.get_or_create_admin_profile(
 
             db,
 
@@ -451,7 +451,7 @@ address_country_code=None,
 
         )
 
-        admin_profile = workspace_service.update_admin_profile(
+        admin_profile = profile_service.update_admin_profile(
 
             db,
 
@@ -606,6 +606,8 @@ address_country_code=None,
             "credentials": cred_resp,
 
         }
+
+
 
 
 

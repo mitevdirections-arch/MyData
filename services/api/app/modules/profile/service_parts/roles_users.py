@@ -27,13 +27,11 @@ from app.db.models import (
     WorkspaceUserRole,
 )
 from app.modules.profile.service_constants import (
-    CORE_PLAN_SEATS,
     DEFAULT_PLATFORM_ROLES,
     DEFAULT_TENANT_ROLES,
     PERM_RE,
     PLATFORM_WORKSPACE_ID,
     ROLE_CODE_RE,
-    UNLIMITED_CORE_PLANS,
     WORKSPACE_PLATFORM,
     WORKSPACE_TENANT,
 )
@@ -94,6 +92,35 @@ class ProfileRoleUserMixin:
         )
         return self._role_to_dict(row)
 
+    def delete_role(self, db: Session, *, workspace_type: str, workspace_id: str, role_code: str, actor: str) -> dict[str, Any]:
+        self._ensure_default_roles(db, workspace_type=workspace_type, workspace_id=workspace_id, actor=actor)
+        code = self._normalize_role_code(role_code)
+        row = db.query(WorkspaceRole).filter(
+            WorkspaceRole.workspace_type == workspace_type,
+            WorkspaceRole.workspace_id == workspace_id,
+            WorkspaceRole.role_code == code,
+        ).first()
+        if row is None:
+            raise ValueError("role_not_found")
+        if bool(row.is_system):
+            raise ValueError("system_role_read_only")
+
+        assignment_count = int(
+            db.query(func.count(WorkspaceUserRole.id)).filter(
+                WorkspaceUserRole.workspace_type == workspace_type,
+                WorkspaceUserRole.workspace_id == workspace_id,
+                WorkspaceUserRole.role_code == code,
+            ).scalar()
+            or 0
+        )
+        if assignment_count > 0:
+            raise ValueError("role_in_use")
+
+        out = self._role_to_dict(row)
+        db.delete(row)
+        db.flush()
+        return out
+
     def _resolve_user_roles(self, db: Session, *, workspace_type: str, workspace_id: str, user_id: str) -> list[str]:
         rows = db.query(WorkspaceUserRole).filter(WorkspaceUserRole.workspace_type == workspace_type, WorkspaceUserRole.workspace_id == workspace_id, WorkspaceUserRole.user_id == user_id).order_by(WorkspaceUserRole.role_code.asc()).all()
         return [x.role_code for x in rows]
@@ -142,13 +169,36 @@ class ProfileRoleUserMixin:
             raise ValueError("user_id_required")
         row = db.query(WorkspaceUser).filter(WorkspaceUser.workspace_type == workspace_type, WorkspaceUser.workspace_id == workspace_id, WorkspaceUser.user_id == uid).first()
         now = self._now()
+        requested_employment_status = (
+            self._clean_text(payload.get("employment_status"), 32)
+            or (row.employment_status if row is not None else "ACTIVE")
+        ).upper()
+
+        should_consume_seat = (
+            workspace_type == WORKSPACE_TENANT
+            and requested_employment_status == "ACTIVE"
+            and (row is None or str(row.employment_status or "").upper() != "ACTIVE")
+        )
+        if should_consume_seat:
+            from app.modules.licensing.service import LicensingPolicyError, service as licensing_service
+
+            try:
+                licensing_service.assert_workspace_user_seat_available(
+                    db,
+                    tenant_id=workspace_id,
+                    user_id=uid,
+                    exclude_user_id=uid,
+                )
+            except LicensingPolicyError:
+                raise
+
         if row is None:
             row = WorkspaceUser(
                 workspace_type=workspace_type, workspace_id=workspace_id, user_id=uid,
                 email=self._clean_text(payload.get("email"), 255),
                 display_name=self._clean_text(payload.get("display_name"), 255) or (uid.split("@", 1)[0] if "@" in uid else uid)[:255],
                 job_title=self._clean_text(payload.get("job_title"), 128), department=self._clean_text(payload.get("department"), 128),
-                employment_status=(self._clean_text(payload.get("employment_status"), 32) or "ACTIVE").upper(),
+                employment_status=requested_employment_status,
                 direct_permissions_json=self._normalize_permissions(list(payload.get("direct_permissions") or [])),
                 meta_json=(dict(payload.get("meta") or {}) if isinstance(payload.get("meta"), dict) else {}),
                 created_by=str(actor or "unknown"), updated_by=str(actor or "unknown"), created_at=now, updated_at=now,
@@ -159,7 +209,7 @@ class ProfileRoleUserMixin:
             row.display_name = self._clean_text(payload.get("display_name"), 255) or row.display_name
             row.job_title = self._clean_text(payload.get("job_title"), 128)
             row.department = self._clean_text(payload.get("department"), 128)
-            row.employment_status = (self._clean_text(payload.get("employment_status"), 32) or row.employment_status).upper()
+            row.employment_status = requested_employment_status
             if "direct_permissions" in payload:
                 row.direct_permissions_json = self._normalize_permissions(list(payload.get("direct_permissions") or []))
             if isinstance(payload.get("meta"), dict):
@@ -194,13 +244,7 @@ class ProfileRoleUserMixin:
         self._ensure_default_roles(db, workspace_type=workspace_type, workspace_id=workspace_id, actor=actor)
         user = db.query(WorkspaceUser).filter(WorkspaceUser.workspace_type == workspace_type, WorkspaceUser.workspace_id == workspace_id, WorkspaceUser.user_id == uid).first()
         if user is None:
-            user = WorkspaceUser(
-                workspace_type=workspace_type, workspace_id=workspace_id, user_id=uid, email=(uid if "@" in uid else None),
-                display_name=(uid.split("@", 1)[0] if "@" in uid else uid)[:255], job_title=None, department=None, employment_status="ACTIVE",
-                direct_permissions_json=[], meta_json={}, created_by=str(actor or "unknown"), updated_by=str(actor or "unknown"), created_at=self._now(), updated_at=self._now(),
-            )
-            db.add(user)
-            db.flush()
+            raise ValueError("user_membership_required")
 
         requested_codes: list[str] = []
         seen: set[str] = set()

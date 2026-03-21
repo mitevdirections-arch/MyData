@@ -170,6 +170,24 @@ class UserDomainSharedMixin:
 
 
 
+        if wtype == WORKSPACE_TENANT:
+            from app.modules.licensing.service import LicensingPolicyError, service as licensing_service
+
+            try:
+                licensing_service.assert_workspace_user_seat_available(
+                    db,
+                    tenant_id=wid,
+                    user_id=uid,
+                    exclude_user_id=uid,
+                )
+            except LicensingPolicyError as exc:
+                code = str(exc.code or "").strip().upper()
+                if code == "CORE_REQUIRED":
+                    raise ValueError("core_required") from exc
+                if code == "CORE_SEAT_LIMIT_EXCEEDED":
+                    raise ValueError("core_seat_limit_exceeded") from exc
+                raise ValueError("licensing_policy_denied") from exc
+
         now = self._now()
 
         row = WorkspaceUser(
