@@ -19,6 +19,8 @@ def _reset_fast_path_flags(monkeypatch) -> None:
             authz_tenant_db_fast_path_enabled=False,
             authz_tenant_db_fast_path_shadow_compare_enabled=False,
             authz_tenant_db_fast_path_source_version=1,
+            guard_device_policy_enabled=True,
+            guard_device_header_name="X-Device-ID",
         ),
     )
 
@@ -76,7 +78,17 @@ def _claims(*, sub: str = "user@tenant.local", tenant_id: str = "tenant-x", role
     }
 
 
-def _make_request(*, method: str = "GET", path: str = "/orders", claims: dict[str, object] | None = None) -> Request:
+def _make_request(
+    *,
+    method: str = "GET",
+    path: str = "/orders",
+    claims: dict[str, object] | None = None,
+    device_id: str | None = None,
+) -> Request:
+    headers: list[tuple[bytes, bytes]] = []
+    if device_id:
+        headers.append((b"x-device-id", str(device_id).encode("utf-8")))
+
     scope = {
         "type": "http",
         "http_version": "1.1",
@@ -85,7 +97,7 @@ def _make_request(*, method: str = "GET", path: str = "/orders", claims: dict[st
         "path": path,
         "raw_path": path.encode("utf-8"),
         "query_string": b"",
-        "headers": [],
+        "headers": headers,
         "client": ("127.0.0.1", 9999),
         "server": ("test", 80),
         "route": SimpleNamespace(path=path),
@@ -201,7 +213,17 @@ def test_orders_policy_enforces_permission_from_tenant_db(monkeypatch) -> None:
     assert str(deny_exc.value.detail).startswith("permission_required:ORDERS.READ")
 
     monkeypatch.setattr(pm, "_tenant_db_effective_permissions", lambda *, claims: ["ORDERS.READ"])
+    monkeypatch.setattr(pm, "_enforce_device_policy_for_business_routes", lambda **_kwargs: None)
     pm.enforce_request_policy(request)
+
+
+def test_orders_policy_requires_device_context_when_permission_allows(monkeypatch) -> None:
+    request = _make_request(path="/orders", claims=_claims())
+    monkeypatch.setattr(pm, "_tenant_db_effective_permissions", lambda *, claims: ["ORDERS.READ"])
+    with pytest.raises(HTTPException) as exc:
+        pm.enforce_request_policy(request)
+    assert int(exc.value.status_code) == 403
+    assert str(exc.value.detail) == "DEVICE_CONTEXT_REQUIRED"
 
 class _CloseOnlyDB:
     def __init__(self) -> None:

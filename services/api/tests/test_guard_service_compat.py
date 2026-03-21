@@ -37,6 +37,11 @@ def test_guard_service_public_entry_points_present() -> None:
         "tenant_status",
         "lease_device",
         "get_lease",
+        "get_device_status",
+        "activate_device",
+        "logout_device",
+        "assert_request_device_active",
+        "revoke_device",
     ]
 
     missing = [name for name in expected if not callable(getattr(svc, name, None))]

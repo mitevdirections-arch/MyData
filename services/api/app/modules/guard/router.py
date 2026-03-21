@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.audit import list_audit, verify_audit_chain, write_audit
@@ -150,7 +150,14 @@ def lease_device(payload: dict[str, Any], claims: dict[str, Any] = Depends(requi
         out = service.lease_device(db=db, tenant_id=tenant_id, user_id=user_id, device_id=device_id, device_class=device_class)
     except ValueError as exc:
         detail = str(exc)
-        status_code = 402 if detail in {"core_required", "core_seat_limit_exceeded"} else 400
+        if detail in {"core_required", "core_seat_limit_exceeded"}:
+            status_code = 402
+        elif detail in {"DEVICE_STATE_CONFLICT_RETRY"}:
+            status_code = 409
+        elif detail in {"device_revoked"}:
+            status_code = 403
+        else:
+            status_code = 400
         raise HTTPException(status_code=status_code, detail=detail) from exc
 
     write_audit(
@@ -172,6 +179,122 @@ def get_my_lease(claims: dict[str, Any] = Depends(require_claims), db: Session =
     if not tenant_id or not user_id:
         raise HTTPException(status_code=403, detail="missing_tenant_or_user_context")
     return service.get_lease(db=db, tenant_id=tenant_id, user_id=user_id)
+
+
+@router.get("/device/status")
+def get_device_status(
+    claims: dict[str, Any] = Depends(require_claims),
+    db: Session = Depends(get_db_session),
+    x_device_id: str | None = Header(default=None, alias="X-Device-ID"),
+) -> dict[str, Any]:
+    tenant_id = str(claims.get("tenant_id") or "").strip()
+    user_id = str(claims.get("sub") or "").strip()
+    device_id = str(x_device_id or "").strip()
+    if not tenant_id or not user_id:
+        raise HTTPException(status_code=403, detail="missing_tenant_or_user_context")
+    if not device_id:
+        raise HTTPException(status_code=400, detail="device_id_required")
+    try:
+        return service.get_device_status(db=db, tenant_id=tenant_id, user_id=user_id, device_id=device_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/device/activate")
+def activate_device(
+    payload: dict[str, Any],
+    claims: dict[str, Any] = Depends(require_claims),
+    db: Session = Depends(get_db_session),
+    x_device_id: str | None = Header(default=None, alias="X-Device-ID"),
+) -> dict[str, Any]:
+    tenant_id = str(claims.get("tenant_id") or "").strip()
+    user_id = str(payload.get("user_id") or claims.get("sub") or "").strip()
+    device_id = str(payload.get("device_id") or x_device_id or "").strip()
+    if not tenant_id:
+        raise HTTPException(status_code=403, detail="missing_tenant_context")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id_required")
+    if not device_id:
+        raise HTTPException(status_code=400, detail="device_id_required")
+
+    try:
+        out = service.activate_device(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            device_id=device_id,
+            actor=str(claims.get("sub") or user_id),
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        if detail in {"core_required", "core_seat_limit_exceeded"}:
+            status_code = 402
+        elif detail in {"DEVICE_STATE_CONFLICT_RETRY"}:
+            status_code = 409
+        elif detail in {"DEVICE_REVOKED", "DEVICE_LOGGED_OUT"}:
+            status_code = 403
+        else:
+            status_code = 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+
+    write_audit(
+        db,
+        action="guard.device_activate",
+        actor=claims.get("sub", "unknown"),
+        tenant_id=tenant_id,
+        target=f"user/{user_id}",
+        metadata={"device_id": device_id},
+    )
+    db.commit()
+    return out
+
+
+@router.post("/device/logout")
+def logout_device(
+    payload: dict[str, Any] | None = None,
+    claims: dict[str, Any] = Depends(require_claims),
+    db: Session = Depends(get_db_session),
+    x_device_id: str | None = Header(default=None, alias="X-Device-ID"),
+) -> dict[str, Any]:
+    body = payload or {}
+    tenant_id = str(claims.get("tenant_id") or "").strip()
+    user_id = str(body.get("user_id") or claims.get("sub") or "").strip()
+    device_id = str(body.get("device_id") or x_device_id or "").strip()
+    if not tenant_id:
+        raise HTTPException(status_code=403, detail="missing_tenant_context")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id_required")
+    if not device_id:
+        raise HTTPException(status_code=400, detail="device_id_required")
+
+    try:
+        out = service.logout_device(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            device_id=device_id,
+            actor=str(claims.get("sub") or user_id),
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        if detail == "device_not_leased":
+            status_code = 404
+        elif detail == "DEVICE_STATE_CONFLICT_RETRY":
+            status_code = 409
+        else:
+            status_code = 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+
+    write_audit(
+        db,
+        action="guard.device_logout",
+        actor=claims.get("sub", "unknown"),
+        tenant_id=tenant_id,
+        target=f"user/{user_id}",
+        metadata={"device_id": device_id},
+    )
+    db.commit()
+    return out
 
 
 @router.get("/tenant-status")

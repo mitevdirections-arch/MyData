@@ -6,7 +6,12 @@ from app.core.policy_matrix import (
     AUTHZ_MODE_FAST_PATH,
     AUTHZ_MODE_TOKEN_CLAIMS,
     AUTHZ_SOURCE_TENANT_DB,
+    DEVICE_POLICY_ENFORCED_PREFIXES,
+    DEVICE_POLICY_NON_ACTIVE_ALLOWLIST,
+    DEVICE_POLICY_OPERATIONAL_EXEMPT_ROUTES,
     ROUTE_POLICY,
+    device_policy_allowlist_contract_violations,
+    device_policy_uncovered_operational_routes,
     is_protected_route_path,
     protected_routes_without_explicit_authz_mode,
 )
@@ -127,3 +132,32 @@ def test_step_up_required_when_enabled(monkeypatch) -> None:
         assert (r.json() or {}).get("detail") == "step_up_required"
     finally:
         get_settings.cache_clear()
+
+
+def test_device_policy_operational_scope_has_no_uncovered_routes() -> None:
+    assert device_policy_uncovered_operational_routes() == []
+
+
+def test_device_policy_non_active_allowlist_contract_is_explicit() -> None:
+    expected = {
+        ("POST", "/guard/heartbeat"),
+        ("GET", "/guard/heartbeat/policy"),
+        ("POST", "/guard/device/lease"),
+        ("GET", "/guard/device/lease/me"),
+        ("GET", "/guard/device/status"),
+        ("POST", "/guard/device/activate"),
+        ("POST", "/guard/device/logout"),
+        ("GET", "/guard/tenant-status"),
+    }
+    assert set(DEVICE_POLICY_NON_ACTIVE_ALLOWLIST) == expected
+    assert set(DEVICE_POLICY_OPERATIONAL_EXEMPT_ROUTES) == {
+        ("GET", "/admin/partners/{partner_id}/verification-summary"),
+        ("POST", "/admin/partners/{partner_id}/verification/recheck"),
+    }
+    assert set(DEVICE_POLICY_ENFORCED_PREFIXES) == {
+        "/orders",
+        "/partners",
+        "/support/tenant",
+        "/ai/tenant-copilot",
+    }
+    assert device_policy_allowlist_contract_violations() == []

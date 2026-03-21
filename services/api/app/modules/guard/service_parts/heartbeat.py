@@ -63,7 +63,12 @@ class GuardHeartbeatMixin:
         # Keep lease activity fresh when heartbeat is from an active leased device.
         lease = (
             db.query(DeviceLease)
-            .filter(DeviceLease.tenant_id == tenant_id, DeviceLease.device_id == device_id, DeviceLease.is_active == True)  # noqa: E712
+            .filter(
+                DeviceLease.tenant_id == tenant_id,
+                DeviceLease.device_id == device_id,
+                DeviceLease.is_active == True,  # noqa: E712
+                DeviceLease.state == "ACTIVE",
+            )
             .first()
         )
         if lease is not None:
@@ -139,7 +144,11 @@ class GuardHeartbeatMixin:
 
         leases = (
             db.query(DeviceLease)
-            .filter(DeviceLease.tenant_id == tenant_id, DeviceLease.is_active == True)  # noqa: E712
+            .filter(
+                DeviceLease.tenant_id == tenant_id,
+                DeviceLease.is_active == True,  # noqa: E712
+                DeviceLease.state == "ACTIVE",
+            )
             .order_by(DeviceLease.leased_at.asc())
             .all()
         )

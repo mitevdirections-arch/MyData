@@ -13,7 +13,7 @@ Split Prep Contract (v1):
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, text
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -322,8 +322,21 @@ class GuardBotNonce(Base):
 class DeviceLease(Base):
     __tablename__ = "device_leases"
     __table_args__ = (
-        UniqueConstraint("tenant_id", "user_id", name="uq_device_lease_tenant_user"),
+        UniqueConstraint("tenant_id", "user_id", "device_class", name="uq_device_lease_tenant_user_class"),
+        CheckConstraint(
+            "(state = 'ACTIVE' AND is_active = true) OR (state <> 'ACTIVE' AND is_active = false)",
+            name="ck_device_lease_state_active_consistent",
+        ),
         Index("ix_device_lease_tenant_user", "tenant_id", "user_id"),
+        Index("ix_device_lease_tenant_user_state", "tenant_id", "user_id", "state"),
+        Index("ix_device_lease_tenant_device", "tenant_id", "device_id"),
+        Index(
+            "uq_device_lease_one_active_user",
+            "tenant_id",
+            "user_id",
+            unique=True,
+            postgresql_where=text("state = 'ACTIVE'"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, server_default=text("gen_random_uuid()"))
@@ -331,9 +344,16 @@ class DeviceLease(Base):
     user_id: Mapped[str] = mapped_column(String(255), nullable=False)
     device_id: Mapped[str] = mapped_column(String(128), nullable=False)
     device_class: Mapped[str] = mapped_column(String(32), nullable=False, default="desktop")
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="ACTIVE")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    state_changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
     leased_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
+    last_live_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
+    paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    background_reachable_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    logged_out_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AuditLog(Base):
