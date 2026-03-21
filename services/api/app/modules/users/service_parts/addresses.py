@@ -220,30 +220,15 @@ class UsersAddressesMixin:
 
 
         db.flush()
-
-        if bool(row.is_primary):
-
-            (
-
-                db.query(WorkspaceUserAddress)
-
-                .filter(
-
-                    WorkspaceUserAddress.workspace_type == wtype,
-
-                    WorkspaceUserAddress.workspace_id == wid,
-
-                    WorkspaceUserAddress.user_id == uid,
-
-                    WorkspaceUserAddress.id != row.id,
-
-                )
-
-                .update({WorkspaceUserAddress.is_primary: False}, synchronize_session=False)
-
-            )
-
-            db.flush()
+        self._enforce_exactly_one_primary(
+            db,
+            model=WorkspaceUserAddress,
+            workspace_type=wtype,
+            workspace_id=wid,
+            user_id=uid,
+            actor=actor,
+            preferred_id=(row.id if bool(row.is_primary) else None),
+        )
 
         return self._address_to_dict(row)
 
@@ -290,11 +275,16 @@ class UsersAddressesMixin:
             raise ValueError("user_address_not_found")
 
         out = self._address_to_dict(row)
-
         db.delete(row)
-
         db.flush()
-
+        self._enforce_exactly_one_primary(
+            db,
+            model=WorkspaceUserAddress,
+            workspace_type=wtype,
+            workspace_id=wid,
+            user_id=uid,
+            actor=actor,
+        )
         return out
 
 

@@ -512,33 +512,15 @@ def upsert_user_next_of_kin(svc,
 
 
     db.flush()
-
-    if bool(row.is_primary):
-
-        (
-
-            db.query(WorkspaceUserNextOfKin)
-
-            .filter(
-
-                WorkspaceUserNextOfKin.workspace_type == wtype,
-
-                WorkspaceUserNextOfKin.workspace_id == wid,
-
-                WorkspaceUserNextOfKin.user_id == uid,
-
-                WorkspaceUserNextOfKin.id != row.id,
-
-            )
-
-            .update({WorkspaceUserNextOfKin.is_primary: False}, synchronize_session=False)
-
-        )
-
-        db.flush()
-
-
-
+    svc._enforce_exactly_one_primary(
+        db,
+        model=WorkspaceUserNextOfKin,
+        workspace_type=wtype,
+        workspace_id=wid,
+        user_id=uid,
+        actor=actor,
+        preferred_id=(row.id if bool(row.is_primary) else None),
+    )
     return svc._next_of_kin_to_dict(row)
 
 
@@ -585,11 +567,16 @@ def delete_user_next_of_kin(svc, db: Session, *, workspace_type: str, workspace_
         raise ValueError("user_next_of_kin_not_found")
 
     out = svc._next_of_kin_to_dict(row)
-
     db.delete(row)
-
     db.flush()
-
+    svc._enforce_exactly_one_primary(
+        db,
+        model=WorkspaceUserNextOfKin,
+        workspace_type=wtype,
+        workspace_id=wid,
+        user_id=uid,
+        actor=actor,
+    )
     return out
 
 

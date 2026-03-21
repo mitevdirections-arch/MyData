@@ -705,4 +705,74 @@ class UsersSharedMixin:
 
         )
 
+    def _list_primary_scope_rows(self, db: Session, *, model: Any, workspace_type: str, workspace_id: str, user_id: str) -> list[Any]:
+        return (
+            db.query(model)
+            .filter(
+                model.workspace_type == workspace_type,
+                model.workspace_id == workspace_id,
+                model.user_id == user_id,
+            )
+            .order_by(
+                model.sort_order.asc(),
+                model.created_at.asc(),
+                model.id.asc(),
+            )
+            .all()
+        )
+
+    def _enforce_exactly_one_primary(
+        self,
+        db: Session,
+        *,
+        model: Any,
+        workspace_type: str,
+        workspace_id: str,
+        user_id: str,
+        actor: str,
+        preferred_id: Any | None = None,
+    ) -> Any | None:
+        rows = self._list_primary_scope_rows(
+            db,
+            model=model,
+            workspace_type=workspace_type,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        if not rows:
+            return None
+
+        preferred_text = str(preferred_id) if preferred_id is not None else None
+        chosen = None
+        if preferred_text:
+            for row in rows:
+                if str(row.id) == preferred_text:
+                    chosen = row
+                    break
+        if chosen is None:
+            for row in rows:
+                if bool(getattr(row, "is_primary", False)):
+                    chosen = row
+                    break
+        if chosen is None:
+            chosen = rows[0]
+
+        now = self._now()
+        actor_id = str(actor or "unknown")
+        changed = False
+        chosen_id_text = str(chosen.id)
+        for row in rows:
+            should_be_primary = str(row.id) == chosen_id_text
+            if bool(getattr(row, "is_primary", False)) != should_be_primary:
+                row.is_primary = should_be_primary
+                if hasattr(row, "updated_by"):
+                    row.updated_by = actor_id
+                if hasattr(row, "updated_at"):
+                    row.updated_at = now
+                changed = True
+
+        if changed:
+            db.flush()
+        return chosen
+
 
