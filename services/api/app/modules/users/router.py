@@ -41,6 +41,7 @@ from app.modules.users.router_parts.next_of_kin import (
     list_user_next_of_kin,
     update_user_next_of_kin,
 )
+from app.modules.users.router_parts.self_credentials import change_my_password, change_my_username
 from app.modules.users.router_parts.self_profile import profile_me, profile_me_update
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -48,6 +49,8 @@ router = APIRouter(prefix="/users", tags=["users"])
 # Self profile (compat surface).
 router.add_api_route("/me", profile_me, methods=["GET"], name="users_me_get")
 router.add_api_route("/me", profile_me_update, methods=["PUT"], name="users_me_put")
+router.add_api_route("/me/credentials/change-password", change_my_password, methods=["POST"], name="users_me_credentials_change_password")
+router.add_api_route("/me/credentials/change-username", change_my_username, methods=["POST"], name="users_me_credentials_change_username")
 
 # Roles / IAM.
 router.add_api_route("/admin/roles", list_roles, methods=["GET"], name="users_admin_roles_get")

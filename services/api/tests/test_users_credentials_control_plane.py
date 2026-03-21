@@ -9,6 +9,7 @@ import pytest
 from app.db.models import WorkspaceUser, WorkspaceUserCredential
 from app.modules.profile.router_parts import admin_workspace as profile_admin_workspace
 from app.modules.profile.router_parts import admin_user_domain as profile_admin_user_domain
+from app.modules.tenants import auth_router as tenants_auth_router
 from app.modules.users.router_parts import admin_workspace as users_admin_workspace
 from app.modules.users.router_parts import admin_user_domain as users_admin_user_domain
 from app.modules.users.service import service as users_service
@@ -279,3 +280,141 @@ def test_provision_route_maps_credential_conflict_to_409(monkeypatch: pytest.Mon
 
     assert exc.value.status_code == 409
     assert exc.value.detail == "credentials_already_issued"
+
+
+def test_service_self_change_password_and_username_flow(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = datetime(2026, 3, 21, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(users_service, "_ensure_workspace_exists", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(users_service, "_unique_username", lambda *_args, **_kwargs: "worker.changed")
+    monkeypatch.setattr(users_service, "_now", lambda: now)
+
+    user_row = SimpleNamespace(user_id="worker@tenant.local", email="worker@tenant.local")
+    db = _FakeCredentialDB(user_row=user_row, credential_row=None)
+
+    issued = users_service.issue_user_credentials(
+        db,
+        workspace_type="TENANT",
+        workspace_id="tenant-cred-01",
+        user_id="worker@tenant.local",
+        actor="admin@tenant.local",
+        payload={"username": "worker"},
+        reset_existing=False,
+    )
+    temp_password = str(issued.get("temporary_password") or "")
+    assert temp_password
+
+    changed_pw = users_service.change_my_password(
+        db,
+        workspace_type="TENANT",
+        workspace_id="tenant-cred-01",
+        user_id="worker@tenant.local",
+        actor="worker@tenant.local",
+        payload={"current_password": temp_password, "new_password": "StrongPass123!"},
+    )
+    assert changed_pw["ok"] is True
+    assert changed_pw["mode"] == "SELF_PASSWORD_CHANGE"
+    assert changed_pw["credential"]["must_change_password"] is False
+
+    changed_username = users_service.change_my_username(
+        db,
+        workspace_type="TENANT",
+        workspace_id="tenant-cred-01",
+        user_id="worker@tenant.local",
+        actor="worker@tenant.local",
+        payload={"current_password": "StrongPass123!", "new_username": "worker.changed"},
+    )
+    assert changed_username["ok"] is True
+    assert changed_username["mode"] == "SELF_USERNAME_CHANGE"
+    assert changed_username["credential"]["username"] == "worker.changed"
+
+
+def test_service_self_change_password_rejects_wrong_current_password(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = datetime(2026, 3, 21, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(users_service, "_ensure_workspace_exists", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(users_service, "_now", lambda: now)
+
+    user_row = SimpleNamespace(user_id="worker@tenant.local", email="worker@tenant.local")
+    db = _FakeCredentialDB(user_row=user_row, credential_row=None)
+
+    users_service.issue_user_credentials(
+        db,
+        workspace_type="TENANT",
+        workspace_id="tenant-cred-01",
+        user_id="worker@tenant.local",
+        actor="admin@tenant.local",
+        payload={"username": "worker"},
+        reset_existing=False,
+    )
+
+    with pytest.raises(ValueError, match="current_password_invalid"):
+        users_service.change_my_password(
+            db,
+            workspace_type="TENANT",
+            workspace_id="tenant-cred-01",
+            user_id="worker@tenant.local",
+            actor="worker@tenant.local",
+            payload={"current_password": "wrong-password", "new_password": "StrongPass123!"},
+        )
+
+
+def test_service_accept_invite_sets_active_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = datetime(2026, 3, 21, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(users_service, "_ensure_workspace_exists", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(users_service, "_unique_username", lambda *_args, **_kwargs: "invited.worker")
+    monkeypatch.setattr(users_service, "_now", lambda: now)
+
+    user_row = SimpleNamespace(user_id="worker@tenant.local", email="worker@tenant.local")
+    db = _FakeCredentialDB(user_row=user_row, credential_row=None)
+
+    invite_out = users_service.issue_user_invite(
+        db,
+        workspace_type="TENANT",
+        workspace_id="tenant-cred-01",
+        user_id="worker@tenant.local",
+        actor="admin@tenant.local",
+        payload={"invite_ttl_hours": 12, "username": "worker"},
+        reset_existing=False,
+    )
+    invite_token = str(invite_out.get("invite_token") or "")
+    assert invite_token
+
+    accepted = users_service.accept_user_invite(
+        db,
+        workspace_type="TENANT",
+        workspace_id="tenant-cred-01",
+        user_id="worker@tenant.local",
+        actor="worker@tenant.local",
+        payload={
+            "invite_token": invite_token,
+            "new_password": "StrongPass123!",
+            "new_username": "invited.worker",
+        },
+    )
+    assert accepted["ok"] is True
+    assert accepted["mode"] == "INVITE_ACCEPT"
+    assert accepted["credential"]["status"] == "ACTIVE"
+    assert accepted["credential"]["must_change_password"] is False
+    assert accepted["credential"]["username"] == "invited.worker"
+
+
+def test_auth_invite_accept_route_calls_canonical_service(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, str, str]] = []
+
+    def _spy_accept(db, *, workspace_type: str, workspace_id: str, user_id: str, actor: str, payload: dict):
+        calls.append((workspace_type, workspace_id, user_id))
+        return {"ok": True, "credential": {"status": "ACTIVE"}, "mode": "INVITE_ACCEPT"}
+
+    monkeypatch.setattr(users_service, "accept_user_invite", _spy_accept)
+    monkeypatch.setattr(tenants_auth_router, "write_audit", lambda *_args, **_kwargs: None)
+
+    out = tenants_auth_router.invite_accept(
+        payload={
+            "tenant_id": "tenant-cred-01",
+            "user_id": "worker@tenant.local",
+            "invite_token": "token",
+            "new_password": "StrongPass123!",
+        },
+        db=_DummyDB(),
+    )
+    assert out["ok"] is True
+    assert calls == [("TENANT", "tenant-cred-01", "worker@tenant.local")]

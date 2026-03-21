@@ -1,10 +1,24 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 
 from app.core.auth import create_access_token
 from app.core.settings import get_settings
 from app.core.startup_security import is_prod_env
+from app.core.audit import write_audit
+from app.db.session import get_db_session
+from app.modules.users.service import service as users_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _invite_accept_error_status(detail: str) -> int:
+    if detail in {"tenant_not_found", "user_membership_required", "credential_not_found"}:
+        return 404
+    if detail in {"invite_token_invalid"}:
+        return 403
+    if detail in {"invite_not_pending", "invite_expired"}:
+        return 409
+    return 400
 
 
 @router.post("/dev-token")
@@ -56,3 +70,40 @@ def dev_token(payload: dict | None = None) -> dict:
         "token_type": "bearer",
         "example_auth_header": f"Bearer {token}",
     }
+
+
+@router.post("/invite/accept")
+def invite_accept(
+    payload: dict | None = None,
+    db: Session = Depends(get_db_session),
+) -> dict:
+    body = payload or {}
+    tenant_id = str(body.get("tenant_id") or "").strip()
+    user_id = str(body.get("user_id") or "").strip()
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="tenant_id_required")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id_required")
+    try:
+        out = users_service.accept_user_invite(
+            db,
+            workspace_type="TENANT",
+            workspace_id=tenant_id,
+            user_id=user_id,
+            actor=user_id,
+            payload=body,
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        raise HTTPException(status_code=_invite_accept_error_status(detail), detail=detail) from exc
+
+    write_audit(
+        db,
+        action="auth.invite.accept",
+        actor=user_id,
+        tenant_id=tenant_id,
+        target=f"user-credentials/TENANT/{tenant_id}/{user_id}",
+        metadata={"workspace_type": "TENANT", "workspace_id": tenant_id},
+    )
+    db.commit()
+    return out

@@ -59,6 +59,10 @@ from app.modules.profile.user_next_of_kin_router import (
     update_user_next_of_kin,
     router as user_next_of_kin_router,
 )
+from app.modules.users.router_parts.self_credentials import (
+    change_my_password as users_change_my_password,
+    change_my_username as users_change_my_username,
+)
 
 router = APIRouter(prefix="/profile", tags=["profile"])
 super_router = APIRouter(prefix="/superadmin/meta", tags=["superadmin.meta"])
@@ -67,6 +71,8 @@ router.include_router(workspace_router)
 router.include_router(admin_workspace_router)
 router.include_router(admin_user_domain_router)
 router.include_router(user_next_of_kin_router)
+router.add_api_route("/me/credentials/change-password", users_change_my_password, methods=["POST"], name="profile_me_credentials_change_password")
+router.add_api_route("/me/credentials/change-username", users_change_my_username, methods=["POST"], name="profile_me_credentials_change_username")
 
 super_router.include_router(profile_super_meta_router)
 

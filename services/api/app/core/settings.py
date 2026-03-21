@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     # Auth hardening
     auth_dev_token_enabled: bool = False
     api_docs_enabled_in_prod: bool = False
+    auth_password_min_length: int = 12
+    auth_password_max_age_days: int = 180
 
     # CORS
     cors_allow_origins: str = ""
@@ -129,6 +131,9 @@ class Settings(BaseSettings):
     guard_bot_sweep_interval_seconds: int = 300
     guard_bot_sweep_limit: int = 200
     guard_bot_default_mode: str = "SCHEDULED"
+    guard_device_policy_enabled: bool = True
+    guard_device_header_name: str = "X-Device-ID"
+    guard_device_paused_desktop_auto_logout_minutes: int = 30
 
     # Guard bot cryptographic controls
     guard_bot_signature_required: bool = False

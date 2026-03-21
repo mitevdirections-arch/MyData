@@ -37,11 +37,14 @@ from .next_of_kin import (
     list_user_next_of_kin,
     update_user_next_of_kin,
 )
+from .self_credentials import change_my_password, change_my_username
 from .self_profile import profile_me, profile_me_update
 
 __all__ = [
     "profile_me",
     "profile_me_update",
+    "change_my_password",
+    "change_my_username",
     "list_roles",
     "upsert_role",
     "delete_role",

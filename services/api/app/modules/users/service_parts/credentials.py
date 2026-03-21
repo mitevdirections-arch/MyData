@@ -214,4 +214,64 @@ class UsersCredentialsMixin:
             actor=actor,
         )
 
+    def change_my_password(
+        self,
+        db: Session,
+        *,
+        workspace_type: str,
+        workspace_id: str,
+        user_id: str,
+        actor: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        return user_domain_ops.change_my_password(
+            self,
+            db,
+            workspace_type=workspace_type,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            actor=actor,
+            payload=payload,
+        )
+
+    def change_my_username(
+        self,
+        db: Session,
+        *,
+        workspace_type: str,
+        workspace_id: str,
+        user_id: str,
+        actor: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        return user_domain_ops.change_my_username(
+            self,
+            db,
+            workspace_type=workspace_type,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            actor=actor,
+            payload=payload,
+        )
+
+    def accept_user_invite(
+        self,
+        db: Session,
+        *,
+        workspace_type: str,
+        workspace_id: str,
+        user_id: str,
+        actor: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        return user_domain_ops.accept_user_invite(
+            self,
+            db,
+            workspace_type=workspace_type,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            actor=actor,
+            payload=payload,
+        )
+
 

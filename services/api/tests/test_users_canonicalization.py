@@ -27,11 +27,22 @@ def test_users_surface_routes_are_bound_to_users_router_parts() -> None:
     route_provision = _route("/users/admin/users/{user_id}/provision", "POST")
     route_contacts = _route("/users/admin/users/{user_id}/contacts", "GET")
     route_self = _route("/users/me", "GET")
+    route_self_pw = _route("/users/me/credentials/change-password", "POST")
+    route_self_username = _route("/users/me/credentials/change-username", "POST")
 
     assert route_users.endpoint.__module__ == "app.modules.users.router_parts.admin_workspace"
     assert route_provision.endpoint.__module__ == "app.modules.users.router_parts.admin_workspace"
     assert route_contacts.endpoint.__module__ == "app.modules.users.router_parts.admin_user_domain"
     assert route_self.endpoint.__module__ == "app.modules.users.router_parts.self_profile"
+    assert route_self_pw.endpoint.__module__ == "app.modules.users.router_parts.self_credentials"
+    assert route_self_username.endpoint.__module__ == "app.modules.users.router_parts.self_credentials"
+
+
+def test_profile_self_credential_routes_use_users_canonical_handlers() -> None:
+    route_profile_pw = _route("/profile/me/credentials/change-password", "POST")
+    route_profile_username = _route("/profile/me/credentials/change-username", "POST")
+    assert route_profile_pw.endpoint.__module__ == "app.modules.users.router_parts.self_credentials"
+    assert route_profile_username.endpoint.__module__ == "app.modules.users.router_parts.self_credentials"
 
 
 def test_profile_and_users_admin_users_call_canonical_users_service(monkeypatch) -> None:

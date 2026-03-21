@@ -2,6 +2,8 @@ def test_users_routes_registered(registered_paths: set[str]) -> None:
     paths = registered_paths
 
     assert '/users/me' in paths
+    assert '/users/me/credentials/change-password' in paths
+    assert '/users/me/credentials/change-username' in paths
     assert '/users/admin/roles' in paths
     assert '/users/admin/roles/{role_code}' in paths
     assert '/users/admin/users' in paths

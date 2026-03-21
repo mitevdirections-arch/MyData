@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import base64
 from datetime import timedelta
+import hashlib
+import hmac
 from typing import Any
 import secrets
 import uuid
 
 from sqlalchemy.orm import Session
 
+from app.core.settings import get_settings
 from app.db.models import WorkspaceUser, WorkspaceUserCredential, WorkspaceUserDocument, WorkspaceUserNextOfKin
 
 
@@ -626,6 +630,56 @@ def _coerce_int(payload: dict[str, Any], *, key: str, default: int, min_value: i
     return max(min_value, min(value, max_value))
 
 
+def _decode_urlsafe_b64(value: str) -> bytes:
+    txt = str(value or "").strip()
+    if not txt:
+        raise ValueError("credential_hash_invalid")
+    padding = "=" * (-len(txt) % 4)
+    try:
+        return base64.urlsafe_b64decode(f"{txt}{padding}".encode("ascii"))
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError("credential_hash_invalid") from exc
+
+
+def _verify_secret_hash(secret: str, *, salt_b64: str, hash_b64: str, iterations: int) -> bool:
+    salt = _decode_urlsafe_b64(salt_b64)
+    expected = _decode_urlsafe_b64(hash_b64)
+    digest = hashlib.pbkdf2_hmac("sha256", secret.encode("utf-8"), salt, int(iterations))
+    return hmac.compare_digest(digest, expected)
+
+
+def _password_policy_settings() -> tuple[int, int]:
+    settings = get_settings()
+    min_length = max(8, min(int(getattr(settings, "auth_password_min_length", 12) or 12), 128))
+    max_age_days = max(30, min(int(getattr(settings, "auth_password_max_age_days", 180) or 180), 3650))
+    return min_length, max_age_days
+
+
+def _validate_new_password(raw: Any, *, min_length: int) -> str:
+    password = str(raw or "")
+    if len(password) < int(min_length):
+        raise ValueError("new_password_too_short")
+    if not any(ch.islower() for ch in password):
+        raise ValueError("new_password_weak")
+    if not any(ch.isupper() for ch in password):
+        raise ValueError("new_password_weak")
+    if not any(ch.isdigit() for ch in password):
+        raise ValueError("new_password_weak")
+    return password
+
+
+def _require_active_credential_for_self_service(row: WorkspaceUserCredential, *, now) -> None:
+    status = str(row.status or "").strip().upper()
+    if status in {"PENDING_INVITE", "INVITE_EXPIRED"}:
+        raise ValueError("invite_not_accepted")
+    if status == "DISABLED":
+        raise ValueError("credential_disabled")
+    if status != "ACTIVE":
+        raise ValueError("credential_not_active")
+    if row.locked_until is not None and row.locked_until > now:
+        raise ValueError("credential_locked")
+
+
 def get_user_credential(svc, db: Session, *, workspace_type: str, workspace_id: str, user_id: str, actor: str) -> dict[str, Any] | None:
 
     svc._ensure_workspace_exists(db, workspace_type=workspace_type, workspace_id=workspace_id)
@@ -1065,3 +1119,208 @@ def reset_user_password(svc, db: Session, *, workspace_type: str, workspace_id: 
         payload=payload,
         reset_existing=True,
     )
+
+
+def change_my_password(
+    svc,
+    db: Session,
+    *,
+    workspace_type: str,
+    workspace_id: str,
+    user_id: str,
+    actor: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    svc._ensure_workspace_exists(db, workspace_type=workspace_type, workspace_id=workspace_id)
+    svc._require_workspace_user(db, workspace_type=workspace_type, workspace_id=workspace_id, user_id=user_id)
+
+    row = _credential_row_for_user(
+        svc,
+        db,
+        workspace_type=workspace_type,
+        workspace_id=workspace_id,
+        user_id=user_id,
+    )
+    if row is None:
+        raise ValueError("credential_not_found")
+
+    now = svc._now()
+    _require_active_credential_for_self_service(row, now=now)
+
+    current_password = str(payload.get("current_password") or "")
+    if not current_password:
+        raise ValueError("current_password_required")
+    if not _verify_secret_hash(
+        current_password,
+        salt_b64=str(row.password_salt or ""),
+        hash_b64=str(row.password_hash or ""),
+        iterations=int(row.hash_iterations or 0),
+    ):
+        raise ValueError("current_password_invalid")
+
+    min_length, max_age_days = _password_policy_settings()
+    new_password = _validate_new_password(payload.get("new_password"), min_length=min_length)
+    if current_password == new_password:
+        raise ValueError("new_password_reuse_not_allowed")
+
+    salt, pw_hash = svc._hash_password(new_password, iterations=int(row.hash_iterations or 210000))
+    row.password_hash = pw_hash
+    row.password_salt = salt
+    row.must_change_password = False
+    row.status = "ACTIVE"
+    row.failed_attempts = 0
+    row.locked_until = None
+    row.password_set_at = now
+    row.password_expires_at = now + timedelta(days=max_age_days)
+    row.updated_by = str(actor or "unknown")
+    row.updated_at = now
+    db.flush()
+
+    return {
+        "ok": True,
+        "credential": svc._credential_public_dict(row),
+        "mode": "SELF_PASSWORD_CHANGE",
+    }
+
+
+def change_my_username(
+    svc,
+    db: Session,
+    *,
+    workspace_type: str,
+    workspace_id: str,
+    user_id: str,
+    actor: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    svc._ensure_workspace_exists(db, workspace_type=workspace_type, workspace_id=workspace_id)
+    svc._require_workspace_user(db, workspace_type=workspace_type, workspace_id=workspace_id, user_id=user_id)
+
+    row = _credential_row_for_user(
+        svc,
+        db,
+        workspace_type=workspace_type,
+        workspace_id=workspace_id,
+        user_id=user_id,
+    )
+    if row is None:
+        raise ValueError("credential_not_found")
+
+    now = svc._now()
+    _require_active_credential_for_self_service(row, now=now)
+
+    current_password = str(payload.get("current_password") or "")
+    if not current_password:
+        raise ValueError("current_password_required")
+    if not _verify_secret_hash(
+        current_password,
+        salt_b64=str(row.password_salt or ""),
+        hash_b64=str(row.password_hash or ""),
+        iterations=int(row.hash_iterations or 0),
+    ):
+        raise ValueError("current_password_invalid")
+
+    requested_username = svc._clean_text(payload.get("new_username"), 128)
+    if not requested_username:
+        raise ValueError("new_username_required")
+
+    wtype, wid = svc._normalize_workspace(workspace_type, workspace_id)
+    username = svc._unique_username(
+        db,
+        workspace_type=wtype,
+        workspace_id=wid,
+        candidate=requested_username,
+        current_id=row.id,
+    )
+
+    row.username = username
+    row.updated_by = str(actor or "unknown")
+    row.updated_at = now
+    db.flush()
+
+    return {
+        "ok": True,
+        "credential": svc._credential_public_dict(row),
+        "mode": "SELF_USERNAME_CHANGE",
+    }
+
+
+def accept_user_invite(
+    svc,
+    db: Session,
+    *,
+    workspace_type: str,
+    workspace_id: str,
+    user_id: str,
+    actor: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    svc._ensure_workspace_exists(db, workspace_type=workspace_type, workspace_id=workspace_id)
+    svc._require_workspace_user(db, workspace_type=workspace_type, workspace_id=workspace_id, user_id=user_id)
+
+    row = _credential_row_for_user(
+        svc,
+        db,
+        workspace_type=workspace_type,
+        workspace_id=workspace_id,
+        user_id=user_id,
+    )
+    if row is None:
+        raise ValueError("credential_not_found")
+
+    status = str(row.status or "").strip().upper()
+    if status not in {"PENDING_INVITE", "INVITE_EXPIRED"}:
+        raise ValueError("invite_not_pending")
+
+    now = svc._now()
+    if row.password_expires_at is not None and row.password_expires_at <= now:
+        row.status = "INVITE_EXPIRED"
+        row.updated_by = str(actor or "unknown")
+        row.updated_at = now
+        db.flush()
+        raise ValueError("invite_expired")
+
+    invite_token = str(payload.get("invite_token") or "").strip()
+    if not invite_token:
+        raise ValueError("invite_token_required")
+    if not _verify_secret_hash(
+        invite_token,
+        salt_b64=str(row.password_salt or ""),
+        hash_b64=str(row.password_hash or ""),
+        iterations=int(row.hash_iterations or 0),
+    ):
+        raise ValueError("invite_token_invalid")
+
+    min_length, max_age_days = _password_policy_settings()
+    new_password = _validate_new_password(payload.get("new_password"), min_length=min_length)
+
+    requested_username = svc._clean_text(payload.get("new_username"), 128) or row.username
+    wtype, wid = svc._normalize_workspace(workspace_type, workspace_id)
+    username = svc._unique_username(
+        db,
+        workspace_type=wtype,
+        workspace_id=wid,
+        candidate=requested_username,
+        current_id=row.id,
+    )
+
+    salt, pw_hash = svc._hash_password(new_password, iterations=int(row.hash_iterations or 210000))
+    row.username = username
+    row.password_hash = pw_hash
+    row.password_salt = salt
+    row.hash_alg = "PBKDF2_SHA256"
+    row.must_change_password = False
+    row.status = "ACTIVE"
+    row.failed_attempts = 0
+    row.locked_until = None
+    row.password_set_at = now
+    row.password_expires_at = now + timedelta(days=max_age_days)
+    row.updated_by = str(actor or "invite_accept")
+    row.updated_at = now
+    db.flush()
+
+    return {
+        "ok": True,
+        "credential": svc._credential_public_dict(row),
+        "mode": "INVITE_ACCEPT",
+    }

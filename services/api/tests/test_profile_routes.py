@@ -5,6 +5,8 @@ def test_profile_routes_registered(registered_paths: set[str]) -> None:
     assert '/admin/company/verification/recheck' in paths
 
     assert '/profile/workspace' in paths
+    assert '/profile/me/credentials/change-password' in paths
+    assert '/profile/me/credentials/change-username' in paths
     assert '/profile/workspace/contacts' in paths
     assert '/profile/workspace/contacts/{contact_id}' in paths
     assert '/profile/workspace/addresses' in paths
