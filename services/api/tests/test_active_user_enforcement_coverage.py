@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from app.modules.licensing.service import LicensingPolicyError, service as licensing_service
 from app.modules.profile.service import WORKSPACE_TENANT, service as workspace_service
 from app.modules.profile.user_domain_service import service as user_domain_service
+from app.modules.users.service import service as users_service
 
 
 class _FakeQuery:
@@ -48,6 +49,7 @@ class _SequencedDB:
 def test_set_workspace_user_roles_requires_existing_membership(monkeypatch: pytest.MonkeyPatch) -> None:
     db = _FakeDB(first_row=None)
     monkeypatch.setattr(workspace_service, "_ensure_default_roles", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(users_service, "_ensure_default_roles", lambda *_args, **_kwargs: None)
 
     with pytest.raises(ValueError, match="user_membership_required"):
         workspace_service.set_workspace_user_roles(
