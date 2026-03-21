@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
@@ -29,6 +29,27 @@ VALID_DEVICE_STATES = {
 
 
 class GuardSecurityLeaseMixin:
+    @staticmethod
+    def _is_retryable_tx_error(exc: BaseException) -> bool:
+        tokens = (
+            "serializationfailure",
+            "transactionretry",
+            "restart transaction",
+            "write too old",
+            "writetooold",
+            "40001",
+        )
+        for candidate in (exc, getattr(exc, "orig", None)):
+            if candidate is None:
+                continue
+            sqlstate = getattr(candidate, "sqlstate", None) or getattr(candidate, "pgcode", None)
+            if str(sqlstate or "").strip() == "40001":
+                return True
+            text = str(candidate or "").strip().lower()
+            if any(token in text for token in tokens):
+                return True
+        return False
+
     def _runtime_safe_non_active_state(self, row: DeviceLease) -> str:
         current = str(row.state or "").strip().upper()
         if current in {
@@ -109,6 +130,11 @@ class GuardSecurityLeaseMixin:
         except IntegrityError as exc:
             db.rollback()
             raise ValueError("DEVICE_STATE_CONFLICT_RETRY") from exc
+        except OperationalError as exc:
+            db.rollback()
+            if self._is_retryable_tx_error(exc):
+                raise ValueError("DEVICE_STATE_CONFLICT_RETRY") from exc
+            raise
 
     def _normalize_device_id(self, device_id: str | None) -> str:
         val = str(device_id or "").strip()
