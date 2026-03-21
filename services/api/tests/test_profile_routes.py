@@ -10,7 +10,9 @@ def test_profile_routes_registered(registered_paths: set[str]) -> None:
     assert '/profile/workspace/addresses' in paths
     assert '/profile/workspace/addresses/{address_id}' in paths
 
+    assert '/profile/admin/roles/{role_code}' in paths
     assert '/profile/admin/users/{user_id}/profile' in paths
+    assert '/profile/admin/users/{user_id}/provision' in paths
     assert '/profile/admin/users/{user_id}/contacts' in paths
     assert '/profile/admin/users/{user_id}/contacts/{contact_id}' in paths
     assert '/profile/admin/users/{user_id}/addresses' in paths
@@ -21,7 +23,11 @@ def test_profile_routes_registered(registered_paths: set[str]) -> None:
     assert '/profile/admin/users/{user_id}/documents/{document_id}' in paths
     assert '/profile/admin/users/{user_id}/credentials' in paths
     assert '/profile/admin/users/{user_id}/credentials/issue' in paths
+    assert '/profile/admin/users/{user_id}/credentials/invite' in paths
     assert '/profile/admin/users/{user_id}/credentials/reset-password' in paths
+    assert '/profile/admin/users/{user_id}/credentials/lock' in paths
+    assert '/profile/admin/users/{user_id}/credentials/unlock' in paths
+    assert '/profile/admin/users/{user_id}/credentials/revoke-invite' in paths
 
 
 def test_superadmin_meta_route_registered(registered_paths: set[str]) -> None:

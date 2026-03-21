@@ -64,6 +64,27 @@ PROTECTED_PREFIXES = (
     "/ai/",
 )
 
+DEVICE_POLICY_ENFORCED_PREFIXES = (
+    "/orders",
+    "/partners",
+    "/support/tenant",
+    "/ai/tenant-copilot",
+)
+DEVICE_POLICY_NON_ACTIVE_ALLOWLIST: set[tuple[str, str]] = {
+    ("POST", "/guard/heartbeat"),
+    ("GET", "/guard/heartbeat/policy"),
+    ("POST", "/guard/device/lease"),
+    ("GET", "/guard/device/lease/me"),
+    ("GET", "/guard/device/status"),
+    ("POST", "/guard/device/activate"),
+    ("POST", "/guard/device/logout"),
+    ("GET", "/guard/tenant-status"),
+}
+DEVICE_POLICY_OPERATIONAL_EXEMPT_ROUTES: set[tuple[str, str]] = {
+    ("GET", "/admin/partners/{partner_id}/verification-summary"),
+    ("POST", "/admin/partners/{partner_id}/verification/recheck"),
+}
+
 
 @dataclass(frozen=True)
 class RoutePolicy:
@@ -80,6 +101,7 @@ ROUTE_POLICY: dict[tuple[str, str], RoutePolicy] = {
     ("POST", "/admin/incidents"): RoutePolicy("INCIDENTS.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("GET", "/admin/incidents/{incident_id}"): RoutePolicy("INCIDENTS.READ", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("GET", "/admin/onboarding/applications"): RoutePolicy("TENANTS.READ", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
+    ("POST", "/admin/onboarding/applications/{application_id}/approve"): RoutePolicy("TENANTS.WRITE", step_up=True, authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("GET", "/admin/payments/credit-account"): RoutePolicy("PAYMENTS.READ", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("GET", "/admin/payments/invoice-template"): RoutePolicy("PAYMENTS.READ", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("PUT", "/admin/payments/invoice-template"): RoutePolicy("PAYMENTS.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
@@ -142,6 +164,9 @@ ROUTE_POLICY: dict[tuple[str, str], RoutePolicy] = {
     ("GET", "/guard/admin/tenant-verify"): RoutePolicy("SECURITY.READ", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("POST", "/guard/device/lease"): RoutePolicy(AUTHENTICATED_ONLY, authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("GET", "/guard/device/lease/me"): RoutePolicy(AUTHENTICATED_ONLY, authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
+    ("GET", "/guard/device/status"): RoutePolicy(AUTHENTICATED_ONLY, authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
+    ("POST", "/guard/device/activate"): RoutePolicy(AUTHENTICATED_ONLY, authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
+    ("POST", "/guard/device/logout"): RoutePolicy(AUTHENTICATED_ONLY, authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("POST", "/guard/heartbeat"): RoutePolicy(AUTHENTICATED_ONLY, authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("GET", "/guard/heartbeat/policy"): RoutePolicy(AUTHENTICATED_ONLY, authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("POST", "/guard/license-snapshot"): RoutePolicy(AUTHENTICATED_ONLY, authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
@@ -203,10 +228,12 @@ ROUTE_POLICY: dict[tuple[str, str], RoutePolicy] = {
     ("POST", "/admin/entity-verification/targets/{target_id}/providers/vies/check"): RoutePolicy("entity_verification.check", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("GET", "/profile/admin/roles"): RoutePolicy("IAM.READ", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("PUT", "/profile/admin/roles/{role_code}"): RoutePolicy("IAM.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
+    ("DELETE", "/profile/admin/roles/{role_code}"): RoutePolicy("IAM.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("GET", "/profile/admin/users"): RoutePolicy("IAM.READ", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("GET", "/profile/admin/users/{user_id}"): RoutePolicy("IAM.READ", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("PUT", "/profile/admin/users/{user_id}"): RoutePolicy("IAM.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("PUT", "/profile/admin/users/{user_id}/roles"): RoutePolicy("IAM.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
+    ("POST", "/profile/admin/users/{user_id}/provision"): RoutePolicy("IAM.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("GET", "/profile/admin/users/{user_id}/profile"): RoutePolicy("IAM.READ", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("PUT", "/profile/admin/users/{user_id}/profile"): RoutePolicy("IAM.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("GET", "/profile/admin/users/{user_id}/contacts"): RoutePolicy("IAM.READ", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
@@ -227,7 +254,11 @@ ROUTE_POLICY: dict[tuple[str, str], RoutePolicy] = {
     ("DELETE", "/profile/admin/users/{user_id}/documents/{document_id}"): RoutePolicy("IAM.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("GET", "/profile/admin/users/{user_id}/credentials"): RoutePolicy("IAM.READ", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("POST", "/profile/admin/users/{user_id}/credentials/issue"): RoutePolicy("IAM.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
+    ("POST", "/profile/admin/users/{user_id}/credentials/invite"): RoutePolicy("IAM.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("POST", "/profile/admin/users/{user_id}/credentials/reset-password"): RoutePolicy("IAM.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
+    ("POST", "/profile/admin/users/{user_id}/credentials/lock"): RoutePolicy("IAM.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
+    ("POST", "/profile/admin/users/{user_id}/credentials/unlock"): RoutePolicy("IAM.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
+    ("POST", "/profile/admin/users/{user_id}/credentials/revoke-invite"): RoutePolicy("IAM.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("GET", "/profile/me"): RoutePolicy("PROFILE.READ", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("PUT", "/profile/me"): RoutePolicy("PROFILE.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("GET", "/profile/workspace"): RoutePolicy("PROFILE.READ", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
@@ -242,10 +273,12 @@ ROUTE_POLICY: dict[tuple[str, str], RoutePolicy] = {
     ("DELETE", "/profile/workspace/addresses/{address_id}"): RoutePolicy("PROFILE.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("GET", "/users/admin/roles"): RoutePolicy("IAM.READ", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("PUT", "/users/admin/roles/{role_code}"): RoutePolicy("IAM.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
+    ("DELETE", "/users/admin/roles/{role_code}"): RoutePolicy("IAM.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("GET", "/users/admin/users"): RoutePolicy("IAM.READ", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("GET", "/users/admin/users/{user_id}"): RoutePolicy("IAM.READ", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("PUT", "/users/admin/users/{user_id}"): RoutePolicy("IAM.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("PUT", "/users/admin/users/{user_id}/roles"): RoutePolicy("IAM.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
+    ("POST", "/users/admin/users/{user_id}/provision"): RoutePolicy("IAM.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("GET", "/users/admin/users/{user_id}/profile"): RoutePolicy("IAM.READ", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("PUT", "/users/admin/users/{user_id}/profile"): RoutePolicy("IAM.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("GET", "/users/admin/users/{user_id}/contacts"): RoutePolicy("IAM.READ", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
@@ -266,7 +299,11 @@ ROUTE_POLICY: dict[tuple[str, str], RoutePolicy] = {
     ("DELETE", "/users/admin/users/{user_id}/documents/{document_id}"): RoutePolicy("IAM.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("GET", "/users/admin/users/{user_id}/credentials"): RoutePolicy("IAM.READ", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("POST", "/users/admin/users/{user_id}/credentials/issue"): RoutePolicy("IAM.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
+    ("POST", "/users/admin/users/{user_id}/credentials/invite"): RoutePolicy("IAM.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("POST", "/users/admin/users/{user_id}/credentials/reset-password"): RoutePolicy("IAM.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
+    ("POST", "/users/admin/users/{user_id}/credentials/lock"): RoutePolicy("IAM.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
+    ("POST", "/users/admin/users/{user_id}/credentials/unlock"): RoutePolicy("IAM.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
+    ("POST", "/users/admin/users/{user_id}/credentials/revoke-invite"): RoutePolicy("IAM.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("GET", "/users/me"): RoutePolicy("PROFILE.READ", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("PUT", "/users/me"): RoutePolicy("PROFILE.WRITE", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
     ("GET", "/superadmin/i18n/platform-default"): RoutePolicy("I18N.READ", authz_mode=AUTHZ_MODE_TOKEN_CLAIMS),
@@ -379,6 +416,51 @@ def _route_path_template(request: Request) -> str:
         if val:
             return str(val)
     return str(request.url.path)
+
+
+def _device_policy_enabled() -> bool:
+    return bool(getattr(get_settings(), "guard_device_policy_enabled", False))
+
+
+def _is_device_policy_enforced_path(path: str) -> bool:
+    p = str(path or "")
+    return any(_path_matches_prefix(p, px) for px in DEVICE_POLICY_ENFORCED_PREFIXES)
+
+
+def _is_non_active_allowlisted(method: str, path: str) -> bool:
+    return (str(method or "").upper(), str(path or "")) in DEVICE_POLICY_NON_ACTIVE_ALLOWLIST
+
+
+def device_policy_uncovered_operational_routes() -> list[str]:
+    # Late import avoids module cycle at import-time.
+    from app.core.route_ownership import ROUTE_PLANE_OPERATIONAL, ROUTE_PLANE_OWNERSHIP
+
+    uncovered: list[str] = []
+    for (method, path), plane in sorted(ROUTE_PLANE_OWNERSHIP.items()):
+        if str(plane or "").strip().upper() != ROUTE_PLANE_OPERATIONAL:
+            continue
+        m = str(method or "").upper()
+        p = str(path or "")
+        if (m, p) in DEVICE_POLICY_OPERATIONAL_EXEMPT_ROUTES:
+            continue
+        if _is_non_active_allowlisted(m, p):
+            continue
+        if not _is_device_policy_enforced_path(p):
+            uncovered.append(f"{m} {p}")
+    return uncovered
+
+
+def device_policy_allowlist_contract_violations() -> list[str]:
+    violations: list[str] = []
+    for method, path in sorted(DEVICE_POLICY_NON_ACTIVE_ALLOWLIST):
+        m = str(method or "").upper()
+        p = str(path or "")
+        if (m, p) not in ROUTE_POLICY:
+            violations.append(f"{m} {p}:missing_route_policy")
+            continue
+        if not is_protected_route_path(p):
+            violations.append(f"{m} {p}:not_protected_path")
+    return violations
 
 
 def _claims_from_request(request: Request) -> dict[str, Any] | None:
@@ -527,6 +609,63 @@ def _enforce_step_up_if_required(*, request: Request, claims: dict[str, Any] | N
             details={"detail": "step_up_required", "header": header_name},
         )
         raise HTTPException(status_code=403, detail="step_up_required")
+
+
+def _enforce_device_policy_for_business_routes(*, request: Request, claims: dict[str, Any], method: str, path: str) -> None:
+    if not _device_policy_enabled():
+        return
+    if _is_non_active_allowlisted(method, path):
+        return
+    if not _is_device_policy_enforced_path(path):
+        return
+
+    header_name = str(getattr(get_settings(), "guard_device_header_name", "X-Device-ID") or "X-Device-ID").strip() or "X-Device-ID"
+    device_id = str(request.headers.get(header_name) or "").strip()
+    if not device_id:
+        _emit_policy_security_event(
+            request=request,
+            claims=claims,
+            event_code="DEVICE_CONTEXT_REQUIRED",
+            severity="HIGH",
+            details={"method": method, "path": path, "header": header_name},
+        )
+        raise HTTPException(status_code=403, detail="DEVICE_CONTEXT_REQUIRED")
+
+    try:
+        tenant_id = ensure_tenant_scope_claims(claims, request=request)
+    except TypeError as exc:
+        if "unexpected keyword argument 'request'" in str(exc):
+            tenant_id = ensure_tenant_scope_claims(claims)
+        else:
+            raise
+    user_id = str((claims or {}).get("sub") or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=403, detail="DEVICE_CONTEXT_REQUIRED")
+
+    from app.modules.guard.service import service as guard_service
+
+    db = get_session_factory()()
+    try:
+        guard_service.assert_request_device_active(
+            db,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            device_id=device_id,
+        )
+    except ValueError as exc:
+        code = str(exc or "DEVICE_NOT_ACTIVE").strip() or "DEVICE_NOT_ACTIVE"
+        if code not in {"DEVICE_NOT_ACTIVE", "DEVICE_REVOKED", "DEVICE_LOGGED_OUT"}:
+            code = "DEVICE_NOT_ACTIVE"
+        _emit_policy_security_event(
+            request=request,
+            claims=claims,
+            event_code=code,
+            severity="HIGH",
+            details={"method": method, "path": path, "device_id": device_id},
+        )
+        raise HTTPException(status_code=403, detail=code) from exc
+    finally:
+        db.close()
 
 
 def _tenant_db_effective_permissions_from_canonical(*, db, tenant_id: str, user_id: str) -> list[str]:
@@ -819,6 +958,13 @@ def enforce_request_policy(request: Request) -> None:
                 raise HTTPException(status_code=403, detail=f"permission_required:{required}")
 
             _enforce_step_up_if_required(request=request, claims=claims, required=bool(rule.step_up))
+
+        _enforce_device_policy_for_business_routes(
+            request=request,
+            claims=claims,
+            method=method,
+            path=path,
+        )
     finally:
         policy_ms = (time.perf_counter() - policy_started) * 1000.0
         record_segment("policy_resolve_ms", policy_ms)

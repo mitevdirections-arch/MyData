@@ -1,6 +1,4 @@
-from __future__ import annotations
-
-from app.modules.users.router_parts.admin_user_domain import (
+from .admin_user_domain import (
     create_user_address,
     create_user_contact,
     create_user_document,
@@ -18,15 +16,40 @@ from app.modules.users.router_parts.admin_user_domain import (
     revoke_user_invite,
     reset_user_password,
     unlock_user_credential,
-    router,
     update_user_address,
     update_user_contact,
     update_user_document,
     update_user_profile,
 )
+from .admin_workspace import (
+    delete_role,
+    get_user,
+    list_roles,
+    list_users,
+    provision_user,
+    set_user_roles,
+    upsert_role,
+    upsert_user,
+)
+from .next_of_kin import (
+    create_user_next_of_kin,
+    delete_user_next_of_kin,
+    list_user_next_of_kin,
+    update_user_next_of_kin,
+)
+from .self_profile import profile_me, profile_me_update
 
 __all__ = [
-    "router",
+    "profile_me",
+    "profile_me_update",
+    "list_roles",
+    "upsert_role",
+    "delete_role",
+    "list_users",
+    "upsert_user",
+    "get_user",
+    "set_user_roles",
+    "provision_user",
     "get_user_profile",
     "update_user_profile",
     "list_user_contacts",
@@ -37,6 +60,10 @@ __all__ = [
     "create_user_address",
     "update_user_address",
     "delete_user_address",
+    "list_user_next_of_kin",
+    "create_user_next_of_kin",
+    "update_user_next_of_kin",
+    "delete_user_next_of_kin",
     "list_user_documents",
     "create_user_document",
     "update_user_document",
