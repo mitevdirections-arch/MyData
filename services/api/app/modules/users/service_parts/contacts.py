@@ -208,30 +208,15 @@ class UsersContactsMixin:
 
 
         db.flush()
-
-        if bool(row.is_primary):
-
-            (
-
-                db.query(WorkspaceUserContactChannel)
-
-                .filter(
-
-                    WorkspaceUserContactChannel.workspace_type == wtype,
-
-                    WorkspaceUserContactChannel.workspace_id == wid,
-
-                    WorkspaceUserContactChannel.user_id == uid,
-
-                    WorkspaceUserContactChannel.id != row.id,
-
-                )
-
-                .update({WorkspaceUserContactChannel.is_primary: False}, synchronize_session=False)
-
-            )
-
-            db.flush()
+        self._enforce_exactly_one_primary(
+            db,
+            model=WorkspaceUserContactChannel,
+            workspace_type=wtype,
+            workspace_id=wid,
+            user_id=uid,
+            actor=actor,
+            preferred_id=(row.id if bool(row.is_primary) else None),
+        )
 
         return self._contact_to_dict(row)
 
@@ -278,11 +263,16 @@ class UsersContactsMixin:
             raise ValueError("user_contact_not_found")
 
         out = self._contact_to_dict(row)
-
         db.delete(row)
-
         db.flush()
-
+        self._enforce_exactly_one_primary(
+            db,
+            model=WorkspaceUserContactChannel,
+            workspace_type=wtype,
+            workspace_id=wid,
+            user_id=uid,
+            actor=actor,
+        )
         return out
 
 

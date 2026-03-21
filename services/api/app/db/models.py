@@ -774,6 +774,14 @@ class WorkspaceUserContactChannel(Base):
         Index("ix_workspace_user_contact_scope_public", "workspace_type", "workspace_id", "user_id", "is_public"),
         Index("ix_workspace_user_contact_scope_primary", "workspace_type", "workspace_id", "user_id", "is_primary"),
         Index("ix_workspace_user_contact_scope_type", "workspace_type", "workspace_id", "user_id", "channel_type"),
+        Index(
+            "uq_ws_user_contact_primary_true",
+            "workspace_type",
+            "workspace_id",
+            "user_id",
+            unique=True,
+            postgresql_where=text("is_primary"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, server_default=text("gen_random_uuid()"))
@@ -802,6 +810,14 @@ class WorkspaceUserAddress(Base):
         Index("ix_workspace_user_address_scope", "workspace_type", "workspace_id", "user_id"),
         Index("ix_workspace_user_address_scope_public", "workspace_type", "workspace_id", "user_id", "is_public"),
         Index("ix_workspace_user_address_scope_primary", "workspace_type", "workspace_id", "user_id", "is_primary"),
+        Index(
+            "uq_ws_user_address_primary_true",
+            "workspace_type",
+            "workspace_id",
+            "user_id",
+            unique=True,
+            postgresql_where=text("is_primary"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, server_default=text("gen_random_uuid()"))
@@ -872,6 +888,14 @@ class WorkspaceUserNextOfKin(Base):
     __table_args__ = (
         Index("ix_workspace_user_nok_scope", "workspace_type", "workspace_id", "user_id"),
         Index("ix_workspace_user_nok_scope_primary", "workspace_type", "workspace_id", "user_id", "is_primary"),
+        Index(
+            "uq_ws_user_nok_primary_true",
+            "workspace_type",
+            "workspace_id",
+            "user_id",
+            unique=True,
+            postgresql_where=text("is_primary"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, server_default=text("gen_random_uuid()"))
