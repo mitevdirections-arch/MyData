@@ -1,0 +1,15 @@
+﻿{
+  "include": [
+    "app",
+    "tests",
+    "alembic"
+  ],
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "extraPaths": [
+        "."
+      ]
+    }
+  ]
+}
