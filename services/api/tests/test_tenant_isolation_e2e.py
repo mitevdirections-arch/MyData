@@ -70,7 +70,7 @@ def test_tenant_isolation_workspace_contacts_e2e(monkeypatch) -> None:
         pytest.skip("TENANT_ISOLATION_E2E_ENABLED is not true")
 
     if not str(os.getenv("DATABASE_URL") or "").strip():
-        pytest.skip("DATABASE_URL is required for tenant isolation e2e")
+        pytest.fail("DATABASE_URL is required for tenant isolation e2e")
 
     monkeypatch.setenv("APP_ENV", "dev")
     monkeypatch.setenv("AUTH_DEV_TOKEN_ENABLED", "true")

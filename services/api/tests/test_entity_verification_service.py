@@ -30,7 +30,7 @@ from app.modules.entity_verification.service import EntityVerificationService
 @pytest.fixture
 def db():
     if not str(os.getenv("DATABASE_URL") or "").strip():
-        pytest.skip("DATABASE_URL is required for entity_verification db-backed tests")
+        pytest.fail("DATABASE_URL is required for entity_verification db-backed tests")
     get_engine.cache_clear()
     session = None
     try:
@@ -40,7 +40,7 @@ def db():
         if session is not None:
             session.close()
         get_engine.cache_clear()
-        pytest.skip(f"entity_verification db unavailable: {exc.__class__.__name__}")
+        pytest.fail(f"entity_verification db unavailable: {exc.__class__.__name__}: {exc}")
     try:
         yield session
     finally:

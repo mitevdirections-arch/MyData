@@ -16,7 +16,7 @@ def test_forward_only_migrations_clean_and_snapshot_upgrade() -> None:
 
     db_url = str(os.getenv("MIGRATIONS_SMOKE_DATABASE_URL") or os.getenv("DATABASE_URL") or "").strip()
     if not db_url:
-        pytest.skip("MIGRATIONS_SMOKE_DATABASE_URL or DATABASE_URL is required")
+        pytest.fail("MIGRATIONS_SMOKE_DATABASE_URL or DATABASE_URL is required")
 
     out = run_smoke(database_url=db_url)
     assert bool(out.get("ok")), out

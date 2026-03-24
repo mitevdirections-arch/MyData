@@ -22,7 +22,7 @@ from app.modules.licensing.service import service as licensing_service
 @pytest.fixture
 def db():
     if not str(os.getenv("DATABASE_URL") or "").strip():
-        pytest.skip("DATABASE_URL is required for device_policy db-backed tests")
+        pytest.fail("DATABASE_URL is required for device_policy db-backed tests")
     get_engine.cache_clear()
     session = None
     try:
@@ -34,11 +34,11 @@ def db():
         if session is not None:
             session.close()
         get_engine.cache_clear()
-        pytest.skip(f"device_policy db unavailable: {exc.__class__.__name__}")
+        pytest.fail(f"device_policy db unavailable: {exc.__class__.__name__}: {exc}")
     if "state" not in cols:
         session.close()
         get_engine.cache_clear()
-        pytest.skip("device_policy_v1 schema not applied (missing device_leases.state)")
+        pytest.fail("device_policy_v1 schema not applied (missing device_leases.state)")
     try:
         yield session
     finally:

@@ -20,7 +20,7 @@ def _require_db_backed_mode() -> None:
     if not _truthy(os.getenv("PARTNERS_DB_BACKED_ENABLED")):
         pytest.skip("PARTNERS_DB_BACKED_ENABLED is not true")
     if not str(os.getenv("DATABASE_URL") or "").strip():
-        pytest.skip("DATABASE_URL is required for partners db-backed tests")
+        pytest.fail("DATABASE_URL is required for partners db-backed tests")
 
 
 def _seed_tenant(db) -> str:

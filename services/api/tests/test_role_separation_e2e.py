@@ -140,7 +140,7 @@ def test_intra_tenant_role_separation_e2e(monkeypatch) -> None:
     if not _truthy(os.getenv("ROLE_SEPARATION_E2E_ENABLED")):
         pytest.skip("ROLE_SEPARATION_E2E_ENABLED is not true")
     if not str(os.getenv("DATABASE_URL") or "").strip():
-        pytest.skip("DATABASE_URL is required for role separation e2e")
+        pytest.fail("DATABASE_URL is required for role separation e2e")
 
     monkeypatch.setenv("APP_ENV", "dev")
     monkeypatch.setenv("AUTH_DEV_TOKEN_ENABLED", "true")
@@ -423,7 +423,7 @@ def test_orders_tenant_isolation_proof_separate_from_role_separation(monkeypatch
     if not _truthy(os.getenv("ROLE_SEPARATION_E2E_ENABLED")):
         pytest.skip("ROLE_SEPARATION_E2E_ENABLED is not true")
     if not str(os.getenv("DATABASE_URL") or "").strip():
-        pytest.skip("DATABASE_URL is required for role separation e2e")
+        pytest.fail("DATABASE_URL is required for role separation e2e")
 
     monkeypatch.setenv("APP_ENV", "dev")
     monkeypatch.setenv("AUTH_DEV_TOKEN_ENABLED", "true")
