@@ -24,9 +24,17 @@ def db():
     if not str(os.getenv("DATABASE_URL") or "").strip():
         pytest.skip("DATABASE_URL is required for device_policy db-backed tests")
     get_engine.cache_clear()
-    session = get_session_factory()()
-    insp = sa.inspect(session.bind)
-    cols = {str(col.get("name")) for col in insp.get_columns("device_leases")}
+    session = None
+    try:
+        session = get_session_factory()()
+        session.execute(sa.text("SELECT 1"))
+        insp = sa.inspect(session.bind)
+        cols = {str(col.get("name")) for col in insp.get_columns("device_leases")}
+    except Exception as exc:  # noqa: BLE001
+        if session is not None:
+            session.close()
+        get_engine.cache_clear()
+        pytest.skip(f"device_policy db unavailable: {exc.__class__.__name__}")
     if "state" not in cols:
         session.close()
         get_engine.cache_clear()
