@@ -17,8 +17,11 @@ def _truthy(value: str | None) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _auth_headers(token: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {token}"}
+def _auth_headers(token: str, *, device_id: str) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {token}",
+        "X-Device-ID": device_id,
+    }
 
 
 def _issue_dev_token(client: TestClient, payload: dict[str, object]) -> str:
@@ -89,6 +92,15 @@ def _set_user_roles(client: TestClient, *, owner_headers: dict[str, str], user_i
         f"/profile/admin/users/{user_id}/roles",
         headers=owner_headers,
         json={"role_codes": role_codes},
+    )
+    assert r.status_code == 200, r.text
+
+
+def _lease_active_device(client: TestClient, *, headers: dict[str, str], device_id: str, device_class: str = "desktop") -> None:
+    r = client.post(
+        "/guard/device/lease",
+        headers=headers,
+        json={"device_id": device_id, "device_class": device_class},
     )
     assert r.status_code == 200, r.text
 
@@ -168,7 +180,7 @@ def test_intra_tenant_role_separation_e2e(monkeypatch) -> None:
                 "tenant_id": "platform",
             },
         )
-        super_headers = _auth_headers(super_token)
+        super_headers = _auth_headers(super_token, device_id=f"dev-super-{suffix}")
 
         _bootstrap_tenant(client, super_headers=super_headers, tenant_id=tenant_id)
         _issue_core_for_tenant(client, super_headers=super_headers, tenant_id=tenant_id)
@@ -183,7 +195,8 @@ def test_intra_tenant_role_separation_e2e(monkeypatch) -> None:
                 "tenant_id": tenant_id,
             },
         )
-        owner_headers = _auth_headers(owner_token)
+        owner_headers = _auth_headers(owner_token, device_id=f"dev-owner-{suffix}")
+        _lease_active_device(client, headers=owner_headers, device_id=f"dev-owner-{suffix}")
 
         _upsert_user(client, owner_headers=owner_headers, user_id=dispatcher_sub, first_name="Ops", last_name="Dispatcher")
         _upsert_user(client, owner_headers=owner_headers, user_id=driver_sub, first_name="Fleet", last_name="Driver")
@@ -240,7 +253,8 @@ def test_intra_tenant_role_separation_e2e(monkeypatch) -> None:
                 "perms": ["IAM.READ", "IAM.WRITE"],
             }
         )
-        dispatcher_headers = _auth_headers(dispatcher_token)
+        dispatcher_headers = _auth_headers(dispatcher_token, device_id=f"dev-disp-{suffix}")
+        _lease_active_device(client, headers=dispatcher_headers, device_id=f"dev-disp-{suffix}")
 
         # dispatcher operational allow path
         disp_access = client.get("/iam/me/access", headers=dispatcher_headers)
@@ -302,7 +316,8 @@ def test_intra_tenant_role_separation_e2e(monkeypatch) -> None:
                 "tenant_id": tenant_id,
             },
         )
-        driver_headers = _auth_headers(driver_token)
+        driver_headers = _auth_headers(driver_token, device_id=f"dev-driver-{suffix}")
+        _lease_active_device(client, headers=driver_headers, device_id=f"dev-driver-{suffix}")
 
         before = _count_orders(tenant_id)
         drv_write = client.post(
@@ -337,7 +352,8 @@ def test_intra_tenant_role_separation_e2e(monkeypatch) -> None:
                 "tenant_id": tenant_id,
             },
         )
-        warehouse_headers = _auth_headers(warehouse_token)
+        warehouse_headers = _auth_headers(warehouse_token, device_id=f"dev-warehouse-{suffix}")
+        _lease_active_device(client, headers=warehouse_headers, device_id=f"dev-warehouse-{suffix}")
 
         wh_list = client.get("/orders?limit=5", headers=warehouse_headers)
         assert wh_list.status_code == 403, wh_list.text
@@ -351,7 +367,8 @@ def test_intra_tenant_role_separation_e2e(monkeypatch) -> None:
                 "tenant_id": tenant_id,
             },
         )
-        limited_headers = _auth_headers(limited_token)
+        limited_headers = _auth_headers(limited_token, device_id=f"dev-limited-{suffix}")
+        _lease_active_device(client, headers=limited_headers, device_id=f"dev-limited-{suffix}")
 
         limited_iam = client.get("/iam/me/access", headers=limited_headers)
         assert limited_iam.status_code == 403, limited_iam.text
@@ -385,7 +402,7 @@ def test_intra_tenant_role_separation_e2e(monkeypatch) -> None:
                 "perms": ["ORDERS.READ", "ORDERS.WRITE"],
             }
         )
-        no_tenant_headers = _auth_headers(no_tenant_token)
+        no_tenant_headers = _auth_headers(no_tenant_token, device_id=f"dev-no-tenant-{suffix}")
         no_tenant_req = client.get("/orders?limit=1", headers=no_tenant_headers)
         assert no_tenant_req.status_code == 403, no_tenant_req.text
         assert (no_tenant_req.json() or {}).get("detail") == "missing_tenant_context"
@@ -399,7 +416,7 @@ def test_intra_tenant_role_separation_e2e(monkeypatch) -> None:
                 "perms": ["ORDERS.READ", "ORDERS.WRITE"],
             }
         )
-        forged_claims_headers = _auth_headers(forged_claims_token)
+        forged_claims_headers = _auth_headers(forged_claims_token, device_id=f"dev-forged-{suffix}")
         forged_write = client.post(
             "/orders",
             headers=forged_claims_headers,
@@ -446,7 +463,7 @@ def test_orders_tenant_isolation_proof_separate_from_role_separation(monkeypatch
                 "tenant_id": "platform",
             },
         )
-        super_headers = _auth_headers(super_token)
+        super_headers = _auth_headers(super_token, device_id=f"dev-super-{suffix}")
 
         _bootstrap_tenant(client, super_headers=super_headers, tenant_id=tenant_a)
         _bootstrap_tenant(client, super_headers=super_headers, tenant_id=tenant_b)
@@ -461,11 +478,15 @@ def test_orders_tenant_isolation_proof_separate_from_role_separation(monkeypatch
         _bootstrap_first_admin(client, super_headers=super_headers, tenant_id=tenant_b, user_id=owner_b_sub)
 
         owner_a = _auth_headers(
-            _issue_dev_token(client, {"sub": owner_a_sub, "roles": ["TENANT_ADMIN"], "tenant_id": tenant_a})
+            _issue_dev_token(client, {"sub": owner_a_sub, "roles": ["TENANT_ADMIN"], "tenant_id": tenant_a}),
+            device_id=f"dev-owner-a-{suffix}",
         )
         owner_b = _auth_headers(
-            _issue_dev_token(client, {"sub": owner_b_sub, "roles": ["TENANT_ADMIN"], "tenant_id": tenant_b})
+            _issue_dev_token(client, {"sub": owner_b_sub, "roles": ["TENANT_ADMIN"], "tenant_id": tenant_b}),
+            device_id=f"dev-owner-b-{suffix}",
         )
+        _lease_active_device(client, headers=owner_a, device_id=f"dev-owner-a-{suffix}")
+        _lease_active_device(client, headers=owner_b, device_id=f"dev-owner-b-{suffix}")
 
         order_a = _create_order(client, headers=owner_a, idx=1000, status="DRAFT")
         order_b = _create_order(client, headers=owner_b, idx=2000, status="DRAFT")

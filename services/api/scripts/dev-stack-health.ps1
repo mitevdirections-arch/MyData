@@ -6,7 +6,28 @@
 
 $ErrorActionPreference = "Stop"
 
-$dbOk = (Test-NetConnection 127.0.0.1 -Port $DbPort -WarningAction SilentlyContinue).TcpTestSucceeded
+function Test-PortOpen {
+  param(
+    [string]$TargetHost = "127.0.0.1",
+    [int]$Port,
+    [int]$TimeoutMs = 700
+  )
+
+  $client = New-Object System.Net.Sockets.TcpClient
+  try {
+    $ar = $client.BeginConnect($TargetHost, $Port, $null, $null)
+    $ok = $ar.AsyncWaitHandle.WaitOne($TimeoutMs, $false)
+    if (-not $ok) { return $false }
+    $client.EndConnect($ar) | Out-Null
+    return $true
+  } catch {
+    return $false
+  } finally {
+    $client.Dispose()
+  }
+}
+
+$dbOk = Test-PortOpen -TargetHost "127.0.0.1" -Port $DbPort
 Write-Host ("db_port_{0}: {1}" -f $DbPort, $dbOk)
 
 try {

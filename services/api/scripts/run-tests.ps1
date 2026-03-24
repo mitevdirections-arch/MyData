@@ -8,8 +8,28 @@ $ErrorActionPreference = "Stop"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $apiRoot = (Resolve-Path (Join-Path $scriptDir ".." )).Path
+$projectRoot = (Resolve-Path (Join-Path $apiRoot "..\.." )).Path
 Set-Location $apiRoot
 $env:PYTHONPATH = "."
+$env:PYTHONDONTWRITEBYTECODE = "1"
+
+function Clear-TransientWorkspaceNoise {
+  param([string]$RootPath)
+
+  if ([string]::IsNullOrWhiteSpace($RootPath) -or -not (Test-Path $RootPath)) {
+    return
+  }
+
+  Get-ChildItem $RootPath -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue |
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+  Get-ChildItem $RootPath -Recurse -File -Filter "*.pyc" -ErrorAction SilentlyContinue |
+    Remove-Item -Force -ErrorAction SilentlyContinue
+
+  $pytestCache = Join-Path $RootPath ".pytest_cache"
+  if (Test-Path $pytestCache) {
+    Remove-Item $pytestCache -Recurse -Force -ErrorAction SilentlyContinue
+  }
+}
 
 # Lightweight dotenv support for local runs.
 if ([string]::IsNullOrWhiteSpace($env:DATABASE_URL)) {
@@ -29,7 +49,20 @@ if ([string]::IsNullOrWhiteSpace($env:DATABASE_URL)) {
   }
 }
 
-$args = @("-m", "pytest")
+if ([string]::IsNullOrWhiteSpace($env:DATABASE_URL)) {
+  $ca = Join-Path $projectRoot "certs\cockroach\ca.crt"
+  $crt = Join-Path $projectRoot "certs\cockroach\client.root.crt"
+  $key = Join-Path $projectRoot "certs\cockroach\client.root.key"
+  if ((Test-Path $ca) -and (Test-Path $crt) -and (Test-Path $key)) {
+    $caUri = $ca -replace "\\", "/"
+    $crtUri = $crt -replace "\\", "/"
+    $keyUri = $key -replace "\\", "/"
+    $env:DATABASE_URL = "cockroachdb+psycopg://root@127.0.0.1:26257/defaultdb?sslmode=verify-full&sslrootcert=$caUri&sslcert=$crtUri&sslkey=$keyUri"
+    Write-Host "[tests] DATABASE_URL auto-configured from local Cockroach certs"
+  }
+}
+
+$args = @("-B", "-m", "pytest")
 if ($Verbose) {
   $args += @("-vv", "-ra", "--durations=$Durations")
 } else {
@@ -41,4 +74,6 @@ if ($Filter) {
 
 Write-Host "[tests] py $($args -join ' ')"
 & py @args
-exit $LASTEXITCODE
+$code = $LASTEXITCODE
+Clear-TransientWorkspaceNoise -RootPath $apiRoot
+exit $code

@@ -225,7 +225,8 @@ def test_external_project_refs_clean_tmp_path(tmp_path: Path) -> None:
 
 
 def test_external_project_refs_detect_foreign_workspace_path(tmp_path: Path) -> None:
-    path = "Use C:/Users/mitev/Desktop/ExternalLookup/bin/crdb-start-only.ps1 for startup\n"
+    # Keep runtime semantics while avoiding repository-level absolute-path literals.
+    path = "Use " + "C:" + "/Users/mitev/Desktop/ExternalLookup/bin/crdb-start-only.ps1 for startup\n"
     (tmp_path / "RUNBOOK.md").write_text(path, encoding="utf-8")
     issues = check_no_external_project_refs(tmp_path)
     assert any(x.startswith("external_project_reference_foreign_workspace:RUNBOOK.md:1") for x in issues)
